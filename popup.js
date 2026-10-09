@@ -1,14 +1,163 @@
-const $=id=>document.getElementById(id);const status=$('status');
-function config(){return {server:$('server').value.trim()};}
-function save(){chrome.runtime.sendMessage({type:'SAVE_CONFIG',...config()});chrome.storage.local.set(config());}
-function render(s){if(s.server){$('server').value=s.server;$('settings-summary').textContent='连接设置（已配置）';}else{$('settings-summary').textContent='连接设置（请先填写服务器地址）';$('connection-settings').open=true;}if(s.room){$('room-box').classList.remove('hidden');$('room-code').textContent=s.room;$('room-connection').textContent=s.connected?'已连接':'连接中 / 正在重连';$('room-members').textContent=`房间人数：${s.memberCount||0}/${s.roomLimit||4}`;const nav=s.pendingNavigation||s.sharedNavigation;if(nav){$('navigation-panel').classList.remove('hidden');$('navigation-title').textContent=s.pendingNavigation?`主机分享：${nav.title||nav.url}`:`当前分享：${nav.title||nav.url}`;$('navigation-url').textContent=nav.url||'';$('navigation-url').href=nav.url||'#';$('follow-actions').classList.toggle('hidden',!s.pendingNavigation);const members=(s.members||[]).filter(id=>id!==s.hostClientId);const labels={pending:'待回应',following:'已跟随', 'not-following':'未跟随'};$('follow-summary').textContent=members.length?members.map((id,i)=>{const response=(s.followResponses||[]).find(r=>r.clientId===id);return `成员 ${i+1}：${labels[response?.status]||'待回应'}`;}).join('　'):'目前没有其他成员。';}else $('navigation-panel').classList.add('hidden');}else $('room-box').classList.add('hidden');if(s.status)status.textContent=s.status;}
-chrome.storage.local.get(['server','room','status','connected','memberCount','roomLimit','members','hostClientId','pendingNavigation','sharedNavigation','followResponses'],render);chrome.runtime.onMessage.addListener(m=>{if(m.type==='STATE')render(m.state);});
-$('server').addEventListener('change',()=>{save();$('server').type='password';$('toggle-server').textContent='显示';$('connection-settings').open=false;$('settings-summary').textContent='连接设置（已配置）';});
-$('toggle-server').onclick=()=>{const input=$('server'),visible=input.type==='password';input.type=visible?'text':'password';$('toggle-server').textContent=visible?'隐藏':'显示';};
-$('follow-yes').onclick=()=>chrome.runtime.sendMessage({type:'FOLLOW_DECISION',follow:true});
-$('follow-no').onclick=()=>chrome.runtime.sendMessage({type:'FOLLOW_DECISION',follow:false});
-async function getTab(){const [t]=await chrome.tabs.query({active:true,currentWindow:true});return t;}
-$('create').onclick=async()=>{save();const t=await getTab();chrome.runtime.sendMessage({type:'CREATE_ROOM',server:$('server').value.trim(),tabId:t?.id});};
-$('join').onclick=async()=>{save();const t=await getTab();chrome.runtime.sendMessage({type:'JOIN_ROOM',server:$('server').value.trim(),room:$('room-input').value.trim(),tabId:t?.id});};
-$('leave').onclick=()=>chrome.runtime.sendMessage({type:'LEAVE'});
-$('copy-room').onclick=async()=>{await navigator.clipboard.writeText($('room-code').textContent);status.textContent='房间码已复制。'};
+const getElement = (id) => document.getElementById(id);
+const statusElement = getElement('status');
+
+function getConfig() {
+    return {
+        server: getElement('server').value.trim(),
+    };
+}
+
+function saveConfig() {
+    const config = getConfig();
+
+    // Store configuration locally and notify the service worker immediately.
+    chrome.runtime.sendMessage({ type: 'SAVE_CONFIG', ...config });
+    chrome.storage.local.set(config);
+}
+
+function render(state) {
+    if (state.server) {
+        getElement('server').value = state.server;
+        getElement('settings-summary').textContent = '连接设置（已配置）';
+    } else {
+        getElement('settings-summary').textContent = '连接设置（请先填写服务器地址）';
+        getElement('connection-settings').open = true;
+    }
+
+    if (state.room) {
+        getElement('room-box').classList.remove('hidden');
+        getElement('room-code').textContent = state.room;
+        getElement('room-connection').textContent = state.connected
+            ? '已连接'
+            : '连接中 / 正在重连';
+        getElement('room-members').textContent =
+            `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
+
+        const navigation = state.pendingNavigation || state.sharedNavigation;
+
+        if (navigation) {
+            getElement('navigation-panel').classList.remove('hidden');
+            getElement('navigation-title').textContent = state.pendingNavigation
+                ? `主机分享：${navigation.title || navigation.url}`
+                : `当前分享：${navigation.title || navigation.url}`;
+            getElement('navigation-url').textContent = navigation.url || '';
+            getElement('navigation-url').href = navigation.url || '#';
+            getElement('follow-actions').classList.toggle(
+                'hidden',
+                !state.pendingNavigation,
+            );
+
+            const members = (state.members || []).filter(
+                (clientId) => clientId !== state.hostClientId,
+            );
+            const statusLabels = {
+                pending: '待回应',
+                following: '已跟随',
+                'not-following': '未跟随',
+            };
+
+            getElement('follow-summary').textContent = members.length
+                ? members
+                      .map((clientId, index) => {
+                          const response = (state.followResponses || []).find(
+                              (item) => item.clientId === clientId,
+                          );
+                          const responseLabel =
+                              statusLabels[response?.status] || '待回应';
+
+                          return `成员 ${index + 1}：${responseLabel}`;
+                      })
+                      .join('　')
+                : '目前没有其他成员。';
+        } else {
+            getElement('navigation-panel').classList.add('hidden');
+        }
+    } else {
+        getElement('room-box').classList.add('hidden');
+    }
+
+    if (state.status) statusElement.textContent = state.status;
+}
+
+// Populate the popup from saved state, then keep it current while it is open.
+chrome.storage.local.get(
+    [
+        'server',
+        'room',
+        'status',
+        'connected',
+        'memberCount',
+        'roomLimit',
+        'members',
+        'hostClientId',
+        'pendingNavigation',
+        'sharedNavigation',
+        'followResponses',
+    ],
+    render,
+);
+
+chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'STATE') render(message.state);
+});
+
+getElement('server').addEventListener('change', () => {
+    saveConfig();
+    getElement('server').type = 'password';
+    getElement('toggle-server').textContent = '显示';
+    getElement('connection-settings').open = false;
+    getElement('settings-summary').textContent = '连接设置（已配置）';
+});
+
+getElement('toggle-server').onclick = () => {
+    const input = getElement('server');
+    const shouldShow = input.type === 'password';
+
+    input.type = shouldShow ? 'text' : 'password';
+    getElement('toggle-server').textContent = shouldShow ? '隐藏' : '显示';
+};
+
+getElement('follow-yes').onclick = () => {
+    chrome.runtime.sendMessage({ type: 'FOLLOW_DECISION', follow: true });
+};
+
+getElement('follow-no').onclick = () => {
+    chrome.runtime.sendMessage({ type: 'FOLLOW_DECISION', follow: false });
+};
+
+async function getActiveTab() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab;
+}
+
+getElement('create').onclick = async () => {
+    saveConfig();
+    const tab = await getActiveTab();
+
+    chrome.runtime.sendMessage({
+        type: 'CREATE_ROOM',
+        server: getElement('server').value.trim(),
+        tabId: tab?.id,
+    });
+};
+
+getElement('join').onclick = async () => {
+    saveConfig();
+    const tab = await getActiveTab();
+
+    chrome.runtime.sendMessage({
+        type: 'JOIN_ROOM',
+        server: getElement('server').value.trim(),
+        room: getElement('room-input').value.trim(),
+        tabId: tab?.id,
+    });
+};
+
+getElement('leave').onclick = () => {
+    chrome.runtime.sendMessage({ type: 'LEAVE' });
+};
+
+getElement('copy-room').onclick = async () => {
+    await navigator.clipboard.writeText(getElement('room-code').textContent);
+    statusElement.textContent = '房间码已复制。';
+};

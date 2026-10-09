@@ -1,6 +1,87 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="popup.css"><title>一起看</title></head>
-<body><header><div class="brand">▶</div><div><h1>一起看</h1><p>小房间网页视频同步</p></div></header>
-<details id="connection-settings"><summary id="settings-summary">连接设置</summary><label for="server">信令服务器地址</label><div class="server-row"><input id="server" type="password" placeholder="wss://域名/ws 或 ws://主机公网IP:8787/ws" spellcheck="false" autocomplete="off"><button id="toggle-server" class="quiet" type="button">显示</button></div><p class="small" id="server-help">地址保存在此浏览器扩展中。每位参与者都需配置同一地址。</p></details>
-<div class="actions"><button id="create" class="primary">创建房间</button><input id="room-input" maxlength="8" placeholder="房间码" autocomplete="off"><button id="join">加入</button></div>
-<section id="room-box" class="room hidden"><div class="room-top"><span>房间码</span><strong id="room-code"></strong><button id="copy-room" class="quiet">复制</button><button id="leave" class="quiet">离开</button></div><div class="room-meta"><span id="room-connection">正在连接服务器…</span><span id="room-members">房间人数：—</span></div><div id="navigation-panel" class="navigation-panel hidden"><strong id="navigation-title"></strong><a id="navigation-url" target="_blank" rel="noreferrer"></a><p id="follow-summary"></p><div id="follow-actions" class="follow-actions"><button id="follow-yes" class="primary">跟随跳转</button><button id="follow-no" class="quiet">不跟随</button></div></div><details id="connection-details"><summary>连接详情</summary><p>播放控制指令经房间服务器转发；视频画面和音频不会经过服务器。</p></details></section>
-<p id="status" role="status">打开视频页面后创建房间，或输入朋友分享的房间码加入。</p><script src="popup.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width" />
+        <link rel="stylesheet" href="popup.css" />
+        <title>一起看</title>
+    </head>
+    <body>
+        <header>
+            <div class="brand">▶</div>
+            <div>
+                <h1>一起看</h1>
+                <p>小房间网页视频同步</p>
+            </div>
+        </header>
+
+        <!-- Server settings stay collapsed after a server address is saved. -->
+        <details id="connection-settings">
+            <summary id="settings-summary">连接设置</summary>
+            <label for="server">信令服务器地址</label>
+            <div class="server-row">
+                <input
+                    id="server"
+                    type="password"
+                    placeholder="wss://域名/ws 或 ws://主机公网IP:8787/ws"
+                    spellcheck="false"
+                    autocomplete="off"
+                />
+                <button id="toggle-server" class="quiet" type="button">
+                    显示
+                </button>
+            </div>
+            <p class="small" id="server-help">
+                地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
+            </p>
+        </details>
+
+        <!-- Create a room or join one with the code shared by the host. -->
+        <div class="actions">
+            <button id="create" class="primary">创建房间</button>
+            <input
+                id="room-input"
+                maxlength="8"
+                placeholder="房间码"
+                autocomplete="off"
+            />
+            <button id="join">加入</button>
+        </div>
+
+        <!-- Room status and navigation choices are shown while in a room. -->
+        <section id="room-box" class="room hidden">
+            <div class="room-top">
+                <span>房间码</span>
+                <strong id="room-code"></strong>
+                <button id="copy-room" class="quiet">复制</button>
+                <button id="leave" class="quiet">离开</button>
+            </div>
+
+            <div class="room-meta">
+                <span id="room-connection">正在连接服务器…</span>
+                <span id="room-members">房间人数：—</span>
+            </div>
+
+            <div id="navigation-panel" class="navigation-panel hidden">
+                <strong id="navigation-title"></strong>
+                <a id="navigation-url" target="_blank" rel="noreferrer"></a>
+                <p id="follow-summary"></p>
+                <div id="follow-actions" class="follow-actions">
+                    <button id="follow-yes" class="primary">跟随跳转</button>
+                    <button id="follow-no" class="quiet">不跟随</button>
+                </div>
+            </div>
+
+            <details id="connection-details">
+                <summary>连接详情</summary>
+                <p>播放控制指令经房间服务器转发；视频画面和音频不会经过服务器。</p>
+            </details>
+        </section>
+
+        <p id="status" role="status">
+            打开视频页面后创建房间，或输入朋友分享的房间码加入。
+        </p>
+
+        <script src="popup.js"></script>
+    </body>
+</html>
