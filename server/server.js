@@ -94,6 +94,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.sharedNavigation = null;
                 room.navigationHistory = [];
                 room.autoPause = { enabled: false, duration: 5 };
+                room.pauseOnBuffer = false;
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 rooms.set(roomId, room);
@@ -158,6 +159,7 @@ webSocketServer.on('connection', (webSocket) => {
                     sharedNavigation: room.sharedNavigation,
                     navigationHistory: room.navigationHistory,
                     autoPause: room.autoPause,
+                    pauseOnBuffer: room.pauseOnBuffer,
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                 }),
@@ -211,6 +213,8 @@ webSocketServer.on('connection', (webSocket) => {
                 'history-sync',
                 'injection-status',
                 'refresh-member-injection',
+                'buffering-status',
+                'buffering-control',
             ]);
 
             if (
@@ -285,15 +289,52 @@ webSocketServer.on('connection', (webSocket) => {
             if (message.event === 'room-settings') {
                 if (webSocket.clientId !== room.hostClientId) return;
 
-                const requested = message.payload.autoPause || {};
-                const duration = [3, 5, 10, 'manual'].includes(requested.duration)
-                    ? requested.duration
-                    : 5;
-                room.autoPause = {
-                    enabled: requested.enabled === true,
-                    duration,
+                if (message.payload.autoPause) {
+                    const requested = message.payload.autoPause;
+                    const duration = [3, 5, 10, 'manual'].includes(
+                        requested.duration,
+                    )
+                        ? requested.duration
+                        : 5;
+                    room.autoPause = {
+                        enabled: requested.enabled === true,
+                        duration,
+                    };
+                }
+
+                if (typeof message.payload.pauseOnBuffer === 'boolean') {
+                    room.pauseOnBuffer = message.payload.pauseOnBuffer;
+                }
+
+                message.payload = {
+                    autoPause: room.autoPause,
+                    pauseOnBuffer: room.pauseOnBuffer,
                 };
-                message.payload = { autoPause: room.autoPause };
+            }
+
+            if (message.event === 'buffering-status') {
+                if (
+                    webSocket.clientId === room.hostClientId ||
+                    message.payload.navigationId !== room.sharedNavigation?.id ||
+                    typeof message.payload.buffering !== 'boolean'
+                ) {
+                    return;
+                }
+
+                message.payload = {
+                    navigationId: room.sharedNavigation.id,
+                    buffering: message.payload.buffering,
+                };
+            }
+
+            if (
+                message.event === 'buffering-control' &&
+                (webSocket.clientId !== room.hostClientId ||
+                    message.payload.navigationId !== room.sharedNavigation?.id ||
+                    !['pause', 'resume'].includes(message.payload.action) ||
+                    typeof message.payload.pauseId !== 'string')
+            ) {
+                return;
             }
 
             if (message.event === 'history-sync') {
@@ -339,6 +380,13 @@ webSocketServer.on('connection', (webSocket) => {
             if (
                 message.event === 'auto-pause-ready' &&
                 message.payload.navigationId !== room.sharedNavigation?.id
+            ) {
+                return;
+            }
+
+            if (
+                message.event === 'buffering-control' &&
+                typeof message.payload.resumePlayback !== 'boolean'
             ) {
                 return;
             }
@@ -422,6 +470,8 @@ webSocketServer.on('connection', (webSocket) => {
                     peer !== webSocket &&
                     peer.readyState === WebSocket.OPEN &&
                     (message.event !== 'injection-status' ||
+                        peer.clientId === room.hostClientId) &&
+                    (message.event !== 'buffering-status' ||
                         peer.clientId === room.hostClientId)
                 ) {
                     peer.send(roomEvent);

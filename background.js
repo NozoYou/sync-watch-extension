@@ -33,6 +33,9 @@ const state = {
     autoPause: { enabled: false, duration: 5 },
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
+    pauseOnBuffer: false,
+    bufferingMembers: [],
+    bufferPause: null,
     currentVideoUrl: '',
     currentPlayback: null,
     pendingNavigation: null,
@@ -63,6 +66,9 @@ const ready = chrome.storage.local
         'autoPause',
         'autoPauseReady',
         'autoPauseStartedNavigationId',
+        'pauseOnBuffer',
+        'bufferingMembers',
+        'bufferPause',
         'currentVideoUrl',
         'currentPlayback',
         'pendingNavigation',
@@ -105,6 +111,9 @@ function persist() {
         autoPause: state.autoPause,
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
+        pauseOnBuffer: state.pauseOnBuffer,
+        bufferingMembers: state.bufferingMembers,
+        bufferPause: state.bufferPause,
         currentVideoUrl: state.currentVideoUrl,
         currentPlayback: state.currentPlayback,
         pendingNavigation: state.pendingNavigation,
@@ -371,6 +380,64 @@ function startAutoPauseWhenReady() {
     sendRoomEvent('auto-pause-start', payload);
 }
 
+function startBufferingPause() {
+    if (
+        state.role !== 'host' ||
+        !state.pauseOnBuffer ||
+        !state.bufferingMembers.length ||
+        !state.sharedNavigation?.id ||
+        state.bufferPause
+    ) {
+        return;
+    }
+
+    const payload = {
+        action: 'pause',
+        pauseId: crypto.randomUUID(),
+        navigationId: state.sharedNavigation.id,
+        resumePlayback: state.currentPlayback?.paused !== true,
+    };
+    state.bufferPause = payload;
+    sendTab({ type: 'BUFFERING_CONTROL', ...payload }, state.videoFrameId);
+    sendRoomEvent('buffering-control', payload);
+    publish();
+}
+
+function finishBufferingPause() {
+    if (state.role !== 'host' || !state.bufferPause) return;
+
+    const previousPause = state.bufferPause;
+    const payload = {
+        action: 'resume',
+        pauseId: previousPause.pauseId,
+        navigationId: previousPause.navigationId,
+        resumePlayback:
+            previousPause.resumePlayback && state.currentPlayback?.paused !== true,
+    };
+
+    state.bufferPause = null;
+    sendTab({ type: 'BUFFERING_CONTROL', ...payload }, state.videoFrameId);
+    sendRoomEvent('buffering-control', payload);
+    publish();
+}
+
+function updateBufferingMember(clientId, isBuffering) {
+    if (!state.bufferingMembers.includes(clientId) && isBuffering) {
+        state.bufferingMembers.push(clientId);
+    } else if (!isBuffering) {
+        state.bufferingMembers = state.bufferingMembers.filter(
+            (memberId) => memberId !== clientId,
+        );
+    }
+
+    if (state.bufferingMembers.length) {
+        startBufferingPause();
+    } else {
+        finishBufferingPause();
+    }
+    publish();
+}
+
 function safePageUrl(value) {
     try {
         const url = new URL(value);
@@ -515,7 +582,10 @@ async function connectRoom() {
                 ...(message.navigationHistory || []),
             ]);
             state.autoPause = message.autoPause || { enabled: false, duration: 5 };
+            state.pauseOnBuffer = message.pauseOnBuffer === true;
             state.autoPauseReady = [];
+            state.bufferingMembers = [];
+            state.bufferPause = null;
 
             if (state.role === 'host') {
                 if (message.sharedNavigation) {
@@ -609,6 +679,9 @@ async function connectRoom() {
         if (message.type === 'peer-left') {
             state.members = state.members.filter((id) => id !== message.clientId);
             delete state.memberInjectionStatus[message.clientId];
+            state.bufferingMembers = state.bufferingMembers.filter(
+                (clientId) => clientId !== message.clientId,
+            );
             state.memberCount = state.members.length;
             state.followResponses = state.followResponses.filter(
                 (response) => response.clientId !== message.clientId,
@@ -617,6 +690,7 @@ async function connectRoom() {
                 (clientId) => clientId !== message.clientId,
             );
             startAutoPauseWhenReady();
+            if (!state.bufferingMembers.length) finishBufferingPause();
             publish();
             return;
         }
@@ -690,7 +764,46 @@ function handleRoomEvent(message) {
             enabled: !!message.payload?.autoPause?.enabled,
             duration: message.payload?.autoPause?.duration || 5,
         };
+        state.pauseOnBuffer = message.payload?.pauseOnBuffer === true;
+        if (!state.pauseOnBuffer) {
+            state.bufferingMembers = [];
+            finishBufferingPause();
+        }
         publish();
+        return;
+    }
+
+    if (
+        message.event === 'buffering-status' &&
+        state.role === 'host' &&
+        message.payload?.navigationId === state.sharedNavigation?.id &&
+        state.members.includes(message.from)
+    ) {
+        const memberResponse = state.followResponses.find(
+            (response) => response.clientId === message.from,
+        );
+
+        if (message.payload.buffering === false) {
+            updateBufferingMember(message.from, false);
+        } else if (
+            message.payload.buffering === true &&
+            memberResponse?.status === 'following'
+        ) {
+            updateBufferingMember(message.from, true);
+        }
+        return;
+    }
+
+    if (
+        message.event === 'buffering-control' &&
+        state.role !== 'host' &&
+        message.payload?.navigationId === state.sharedNavigation?.id &&
+        state.followingHost === true
+    ) {
+        sendTab(
+            { type: 'BUFFERING_CONTROL', ...message.payload },
+            state.videoFrameId,
+        );
         return;
     }
 
@@ -1118,6 +1231,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const action = message.videoState?.action;
             const ownSettings = getMemberSettings(state.clientId);
 
+            // A manual host pause during a buffering pause should prevent auto-resume.
+            if (state.role === 'host' && state.bufferPause && action === 'pause') {
+                state.bufferPause.resumePlayback = false;
+            } else if (
+                state.role === 'host' &&
+                state.bufferPause &&
+                action === 'play'
+            ) {
+                finishBufferingPause();
+            }
+
             if (
                 state.role !== 'host' &&
                 !message.snapshot &&
@@ -1155,6 +1279,26 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (
+            message.type === 'BUFFERING_STATUS' &&
+            sender.tab?.id === state.tabId &&
+            (sender.frameId || 0) === state.videoFrameId &&
+            state.room &&
+            state.connected &&
+            state.videoReady &&
+            state.sharedNavigation?.id
+        ) {
+            if (state.role === 'host') {
+                updateBufferingMember(state.clientId, message.buffering === true);
+            } else if (state.followingHost === true) {
+                sendRoomEvent('buffering-status', {
+                    navigationId: state.sharedNavigation.id,
+                    buffering: message.buffering === true,
+                });
+            }
+            return;
+        }
+
+        if (
             message.type === 'SHARE_PAGE' &&
             state.role === 'host' &&
             state.hostCandidate &&
@@ -1164,6 +1308,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const selected = bestVideoFrame(candidate.tabId);
             const url = safePageUrl(candidate.url);
             if (!url) return;
+
+            // End any buffering pause against the old video before switching IDs.
+            finishBufferingPause();
+            state.bufferingMembers = [];
 
             switchRoomTab(candidate.tabId);
             state.videoFrameId = selected?.frameId ?? candidate.frameId;
@@ -1284,7 +1432,30 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 duration,
             };
             publish();
-            sendRoomEvent('room-settings', { autoPause: state.autoPause });
+            sendRoomEvent('room-settings', {
+                autoPause: state.autoPause,
+                pauseOnBuffer: state.pauseOnBuffer,
+            });
+            return;
+        }
+
+        if (
+            message.type === 'SET_PAUSE_ON_BUFFER' &&
+            state.role === 'host' &&
+            state.connected
+        ) {
+            state.pauseOnBuffer = !!message.enabled;
+
+            if (!state.pauseOnBuffer) {
+                state.bufferingMembers = [];
+                finishBufferingPause();
+            }
+
+            publish();
+            sendRoomEvent('room-settings', {
+                autoPause: state.autoPause,
+                pauseOnBuffer: state.pauseOnBuffer,
+            });
             return;
         }
 
@@ -1323,6 +1494,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseOnBuffer = false;
+            state.bufferingMembers = [];
+            state.bufferPause = null;
             state.autoPauseReady = [];
             state.autoPauseStartedNavigationId = '';
             state.memberCount = 0;
@@ -1380,6 +1554,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseOnBuffer = false;
+            state.bufferingMembers = [];
+            state.bufferPause = null;
             state.autoPauseReady = [];
             state.autoPauseStartedNavigationId = '';
             state.dataConnections = 0;
@@ -1410,6 +1587,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseOnBuffer = false;
+            state.bufferingMembers = [];
+            state.bufferPause = null;
             state.autoPauseReady = [];
             state.autoPauseStartedNavigationId = '';
             state.pendingNavigation = null;

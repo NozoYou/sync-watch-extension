@@ -26,6 +26,11 @@
     let tabMarkerObserver = null;
     let pageObserver = null;
     let reportInterval = null;
+    let bufferingTimer = null;
+    let bufferingVideo = null;
+    let bufferingReported = false;
+    let lastBufferingReportAt = 0;
+    const bufferingPauseStates = new WeakMap();
 
     const tabTitlePrefix = '[一起看] ';
     const tabIconId = '__sync_watch_tab_icon';
@@ -137,6 +142,8 @@
     function bind(currentVideo) {
         if (!currentVideo || currentVideo === video) return;
 
+        if (bufferingReported) reportBufferingStatus(false, bufferingVideo);
+
         video = currentVideo;
         videoBindingId += 1;
 
@@ -158,6 +165,90 @@
             () => sendVideo(currentVideo, currentVideo.seeking ? 'seeking' : 'time'),
             { passive: true, signal: pageEventController.signal },
         );
+        currentVideo.addEventListener(
+            'waiting',
+            () => scheduleBufferingStatus(currentVideo),
+            { passive: true, signal: pageEventController.signal },
+        );
+        currentVideo.addEventListener(
+            'stalled',
+            () => scheduleBufferingStatus(currentVideo),
+            { passive: true, signal: pageEventController.signal },
+        );
+        for (const eventName of ['playing', 'canplay']) {
+            currentVideo.addEventListener(
+                eventName,
+                () => clearBufferingStatus(currentVideo),
+                { passive: true, signal: pageEventController.signal },
+            );
+        }
+    }
+
+    function reportBufferingStatus(buffering, currentVideo) {
+        bufferingReported = buffering;
+        bufferingVideo = buffering ? currentVideo : null;
+        lastBufferingReportAt = Date.now();
+        chrome.runtime
+            .sendMessage({ type: 'BUFFERING_STATUS', buffering })
+            .catch(() => {});
+    }
+
+    function scheduleBufferingStatus(currentVideo) {
+        clearTimeout(bufferingTimer);
+        if (currentVideo.paused) return;
+
+        // Ignore very short waits; they are common during normal playback.
+        bufferingTimer = setTimeout(() => {
+            if (
+                currentVideo !== chooseVideo() ||
+                currentVideo.paused ||
+                currentVideo.readyState > HTMLMediaElement.HAVE_FUTURE_DATA
+            ) {
+                return;
+            }
+
+            if (!bufferingReported) {
+                reportBufferingStatus(true, currentVideo);
+            }
+        }, 1200);
+    }
+
+    function clearBufferingStatus(currentVideo) {
+        clearTimeout(bufferingTimer);
+        if (bufferingReported && bufferingVideo === currentVideo) {
+            reportBufferingStatus(false, currentVideo);
+        }
+    }
+
+    function applyBufferingControl(message) {
+        const currentVideo = chooseVideo();
+        if (!currentVideo || !message.pauseId) return;
+
+        if (message.action === 'pause') {
+            if (bufferingPauseStates.get(currentVideo)?.pauseId === message.pauseId) {
+                return;
+            }
+
+            bufferingPauseStates.set(currentVideo, {
+                pauseId: message.pauseId,
+                wasPaused: currentVideo.paused,
+            });
+            if (!currentVideo.paused) {
+                expectMediaEvent(currentVideo, 'paused', true);
+                currentVideo.pause();
+            }
+            return;
+        }
+
+        if (message.action !== 'resume') return;
+        const previousPause = bufferingPauseStates.get(currentVideo);
+        if (previousPause?.pauseId !== message.pauseId) return;
+
+        bufferingPauseStates.delete(currentVideo);
+        if (message.resumePlayback && !previousPause.wasPaused && currentVideo.paused) {
+            expectMediaEvent(currentVideo, 'paused', false);
+            currentVideo.play().catch(() => {});
+        }
     }
 
     // Report script health separately from video-frame discovery.
@@ -402,6 +493,8 @@
             applyVideo(message.videoState);
         } else if (message.type === 'AUTO_PAUSE') {
             applyAutomaticPause(message);
+        } else if (message.type === 'BUFFERING_CONTROL') {
+            applyBufferingControl(message);
         } else if (message.type === 'SET_TAB_MARKER') {
             updateTabMarker(message.enabled, message.modifyIcon);
         } else if (message.type === 'SHOW_HOST_PROMPT') {
@@ -454,7 +547,15 @@
     }
 
     // Watch for players inserted after the page's initial load, including SPA navigation.
-    bind(chooseVideo());
+    const initialVideo = chooseVideo();
+    bind(initialVideo);
+    if (
+        initialVideo &&
+        !initialVideo.paused &&
+        initialVideo.readyState <= HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+        scheduleBufferingStatus(initialVideo);
+    }
     reportVideoFrame();
     reportInjectionStatus(true);
     pageObserver = new MutationObserver(() => {
@@ -476,16 +577,24 @@
         if (!video || !video.isConnected) bind(chooseVideo());
         reportVideoFrame();
         reportInjectionStatus();
+        // Heartbeat lets a newly-enabled room setting detect an existing stall.
+        if (bufferingReported && Date.now() - lastBufferingReportAt >= 5000) {
+            reportBufferingStatus(true, bufferingVideo);
+        }
     }, 2500);
 
     // Make repeated executeScript calls safe and prevent duplicate event handlers.
     window.__syncWatchCleanup = () => {
+        if (bufferingReported) {
+            reportBufferingStatus(false, bufferingVideo);
+        }
         pageEventController.abort();
         chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
         pageObserver?.disconnect();
         tabMarkerObserver?.disconnect();
         clearInterval(reportInterval);
         clearTimeout(autoPauseTimer);
+        clearTimeout(bufferingTimer);
         document.getElementById('__sync_watch_prompt')?.remove();
         document.getElementById(tabIconId)?.remove();
 
