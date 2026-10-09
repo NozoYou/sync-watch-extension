@@ -163,6 +163,60 @@ button:hover {
     font-size: 11px;
 }
 
+/* Per-member playback permissions and automatic navigation following. */
+.auto-follow-control,
+.host-member-settings {
+    margin-top: 10px;
+}
+
+.setting-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: #c4cada;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.setting-checkbox input {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    accent-color: #8777ff;
+}
+
+.host-member-settings h2 {
+    margin: 0 0 7px;
+    color: #aab1c2;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.member-setting-card {
+    margin-top: 6px;
+    padding: 8px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
+.member-setting-name {
+    display: block;
+    margin-bottom: 7px;
+    color: #dedaff;
+    font-size: 11px;
+}
+
+.member-setting-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px 12px;
+}
+
+.member-setting-option {
+    font-size: 10px;
+}
+
 .navigation-panel {
     margin-top: 9px;
     padding: 9px 10px;

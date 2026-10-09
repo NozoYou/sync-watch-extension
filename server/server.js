@@ -6,6 +6,14 @@ const port = Number(process.env.PORT || 8787);
 const roomLimit = Math.max(2, Math.min(64, Number(process.env.ROOM_LIMIT || 4)));
 const rooms = new Map();
 
+function defaultMemberSettings() {
+    return {
+        canControlPlayback: true,
+        canSeek: true,
+        autoFollow: false,
+    };
+}
+
 // HTTP is used for a simple health check; room messages travel over WebSocket.
 const server = http.createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
@@ -74,14 +82,22 @@ webSocketServer.on('connection', (webSocket) => {
                 return;
             }
 
+            // Reuse the extension's stable ID so permissions survive socket reconnects.
+            const requestedClientId = String(message.clientId || '');
+            const clientId = /^[A-Za-z0-9-]{1,64}$/.test(requestedClientId)
+                ? requestedClientId
+                : webSocket.clientId;
+
             let room = rooms.get(roomId);
             if (!room) {
                 room = new Map();
                 room.sharedNavigation = null;
+                room.hostClientId = null;
+                room.memberSettings = new Map();
                 rooms.set(roomId, room);
             }
 
-            if (room.size >= roomLimit) {
+            if (room.size >= roomLimit && !room.has(clientId)) {
                 webSocket.send(
                     JSON.stringify({
                         type: 'error',
@@ -91,9 +107,44 @@ webSocketServer.on('connection', (webSocket) => {
                 return;
             }
 
+            if (room.has(clientId)) {
+                // A reconnect replaces the old socket without changing its room identity.
+                room.get(clientId).close(4001, 'Member reconnected');
+            }
+
+            webSocket.clientId = clientId;
             webSocket.room = roomId;
-            const existingMembers = [...room.keys()];
+
+            // Prefer the room creator when they reconnect after a server restart.
+            // If no host has joined yet, the first member is a temporary fallback.
+            const previousHostClientId = room.hostClientId;
+            if (message.role === 'host' || !room.hostClientId) {
+                room.hostClientId = clientId;
+            }
+            if (!room.memberSettings.has(clientId)) {
+                room.memberSettings.set(clientId, defaultMemberSettings());
+            }
+
+            const existingMembers = [...room.keys()].filter(
+                (existingId) => existingId !== clientId,
+            );
             room.set(webSocket.clientId, webSocket);
+
+            if (
+                previousHostClientId !== room.hostClientId &&
+                previousHostClientId !== null
+            ) {
+                const hostChange = JSON.stringify({
+                    type: 'host-changed',
+                    hostClientId: room.hostClientId,
+                });
+
+                for (const peer of room.values()) {
+                    if (peer !== webSocket && peer.readyState === WebSocket.OPEN) {
+                        peer.send(hostChange);
+                    }
+                }
+            }
 
             // Give the new member the current room state and member list.
             webSocket.send(
@@ -103,6 +154,8 @@ webSocketServer.on('connection', (webSocket) => {
                     peers: existingMembers,
                     limit: roomLimit,
                     sharedNavigation: room.sharedNavigation,
+                    hostClientId: room.hostClientId,
+                    memberSettings: Object.fromEntries(room.memberSettings),
                 }),
             );
 
@@ -147,6 +200,7 @@ webSocketServer.on('connection', (webSocket) => {
                 'follow-response',
                 'snapshot-request',
                 'snapshot',
+                'member-settings',
             ]);
 
             if (
@@ -167,6 +221,62 @@ webSocketServer.on('connection', (webSocket) => {
             }
 
             const room = rooms.get(webSocket.room);
+
+            if (
+                (message.event === 'video' || message.event === 'snapshot') &&
+                webSocket.clientId !== room.hostClientId
+            ) {
+                const memberSettings =
+                    room.memberSettings.get(webSocket.clientId) ||
+                    defaultMemberSettings();
+                const action = message.payload.action;
+
+                // Enforce room permissions before relaying a member's control to anyone.
+                if (
+                    (['play', 'pause'].includes(action) &&
+                        !memberSettings.canControlPlayback) ||
+                    (action === 'seeked' && !memberSettings.canSeek) ||
+                    ['time', 'seek'].includes(action)
+                ) {
+                    return;
+                }
+            }
+
+            if (message.event === 'member-settings') {
+                const targetClientId = String(message.payload.targetClientId || '');
+                const requestedSettings = message.payload.settings || {};
+                const isHost = webSocket.clientId === room.hostClientId;
+                const isSelf = webSocket.clientId === targetClientId;
+
+                // Hosts manage all three settings; members may change their own auto-follow option.
+                if (!room.has(targetClientId) || (!isHost && !isSelf)) return;
+
+                const allowedSettings = isHost
+                    ? ['canControlPlayback', 'canSeek', 'autoFollow']
+                    : ['autoFollow'];
+                const updates = {};
+
+                for (const key of allowedSettings) {
+                    if (typeof requestedSettings[key] === 'boolean') {
+                        updates[key] = requestedSettings[key];
+                    }
+                }
+
+                if (Object.keys(updates).length === 0) return;
+
+                const currentSettings =
+                    room.memberSettings.get(targetClientId) || defaultMemberSettings();
+                room.memberSettings.set(targetClientId, {
+                    ...currentSettings,
+                    ...updates,
+                });
+
+                message.payload = {
+                    targetClientId,
+                    settings: updates,
+                };
+            }
+
             if (message.event === 'navigate') {
                 room.sharedNavigation = message.payload;
             }
@@ -191,9 +301,12 @@ webSocketServer.on('connection', (webSocket) => {
         if (!webSocket.room) return;
 
         const room = rooms.get(webSocket.room);
-        room?.delete(webSocket.clientId);
+        const isCurrentConnection = room?.get(webSocket.clientId) === webSocket;
 
-        if (room) {
+        // An older socket may close after a reconnect has already replaced it.
+        if (isCurrentConnection) room.delete(webSocket.clientId);
+
+        if (room && isCurrentConnection) {
             for (const peer of room.values()) {
                 if (peer.readyState === WebSocket.OPEN) {
                     peer.send(

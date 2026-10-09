@@ -7,6 +7,69 @@ function getConfig() {
     };
 }
 
+function renderHostMemberSettings(state) {
+    const settingsPanel = getElement('host-member-settings');
+    const settingsList = getElement('member-settings-list');
+    const members = (state.members || []).filter(
+        (clientId) => clientId !== state.hostClientId,
+    );
+
+    settingsList.replaceChildren();
+
+    for (const [index, clientId] of members.entries()) {
+        const settings = {
+            canControlPlayback: true,
+            canSeek: true,
+            autoFollow: false,
+            ...(state.memberSettings?.[clientId] || {}),
+        };
+        const card = document.createElement('div');
+        card.className = 'member-setting-card';
+
+        const name = document.createElement('strong');
+        name.className = 'member-setting-name';
+        name.textContent = `成员 ${index + 1} · ${clientId.slice(-4)}`;
+
+        const options = document.createElement('div');
+        options.className = 'member-setting-options';
+
+        const fields = [
+            ['canControlPlayback', '播放 / 暂停'],
+            ['canSeek', '进度条跳转'],
+            ['autoFollow', '自动跟随新视频'],
+        ];
+
+        for (const [key, labelText] of fields) {
+            const label = document.createElement('label');
+            label.className = 'setting-checkbox member-setting-option';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = !!settings[key];
+            checkbox.disabled = !state.connected;
+            checkbox.addEventListener('change', () => {
+                chrome.runtime.sendMessage({
+                    type: 'UPDATE_MEMBER_SETTINGS',
+                    targetClientId: clientId,
+                    key,
+                    value: checkbox.checked,
+                });
+            });
+
+            label.append(checkbox, document.createTextNode(labelText));
+            options.append(label);
+        }
+
+        card.append(name, options);
+        settingsList.append(card);
+    }
+
+    settingsPanel.classList.toggle(
+        'hidden',
+        state.role !== 'host' || members.length === 0,
+    );
+}
+
 function saveConfig() {
     const config = getConfig();
 
@@ -32,6 +95,13 @@ function render(state) {
             : '连接中 / 正在重连';
         getElement('room-members').textContent =
             `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
+
+        const isGuest = state.role !== 'host';
+        getElement('auto-follow-control').classList.toggle('hidden', !isGuest);
+        getElement('auto-follow').checked = !!
+            state.memberSettings?.[state.clientId]?.autoFollow;
+        getElement('auto-follow').disabled = !state.connected;
+        renderHostMemberSettings(state);
 
         const navigation = state.pendingNavigation || state.sharedNavigation;
 
@@ -74,6 +144,8 @@ function render(state) {
         }
     } else {
         getElement('room-box').classList.add('hidden');
+        getElement('auto-follow-control').classList.add('hidden');
+        getElement('host-member-settings').classList.add('hidden');
     }
 
     if (state.status) statusElement.textContent = state.status;
@@ -89,6 +161,9 @@ chrome.storage.local.get(
         'memberCount',
         'roomLimit',
         'members',
+        'memberSettings',
+        'role',
+        'clientId',
         'hostClientId',
         'pendingNavigation',
         'sharedNavigation',
@@ -124,6 +199,13 @@ getElement('follow-yes').onclick = () => {
 getElement('follow-no').onclick = () => {
     chrome.runtime.sendMessage({ type: 'FOLLOW_DECISION', follow: false });
 };
+
+getElement('auto-follow').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_FOLLOW',
+        enabled: getElement('auto-follow').checked,
+    });
+});
 
 async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

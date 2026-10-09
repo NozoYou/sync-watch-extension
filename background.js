@@ -25,6 +25,7 @@ const state = {
     clientId: '',
     hostClientId: '',
     members: [],
+    memberSettings: {},
     currentVideoUrl: '',
     pendingNavigation: null,
     sharedNavigation: null,
@@ -48,6 +49,7 @@ const ready = chrome.storage.local
         'clientId',
         'hostClientId',
         'members',
+        'memberSettings',
         'currentVideoUrl',
         'pendingNavigation',
         'sharedNavigation',
@@ -82,6 +84,7 @@ function persist() {
         clientId: state.clientId,
         hostClientId: state.hostClientId,
         members: state.members,
+        memberSettings: state.memberSettings,
         currentVideoUrl: state.currentVideoUrl,
         pendingNavigation: state.pendingNavigation,
         sharedNavigation: state.sharedNavigation,
@@ -99,6 +102,48 @@ function publish() {
 function setStatus(status) {
     state.status = status;
     publish();
+}
+
+function defaultMemberSettings() {
+    return {
+        canControlPlayback: true,
+        canSeek: true,
+        autoFollow: false,
+    };
+}
+
+function getMemberSettings(clientId) {
+    if (!state.memberSettings[clientId]) {
+        state.memberSettings[clientId] = defaultMemberSettings();
+    }
+
+    return state.memberSettings[clientId];
+}
+
+function canSendPlaybackAction(settings, action) {
+    if (action === 'play' || action === 'pause') {
+        return settings.canControlPlayback;
+    }
+
+    if (action === 'seek' || action === 'seeked') {
+        return settings.canSeek;
+    }
+
+    return true;
+}
+
+function mergeRoomMemberSettings(memberSettings = {}) {
+    state.memberSettings = {
+        ...state.memberSettings,
+        ...memberSettings,
+    };
+
+    for (const clientId of state.members) {
+        state.memberSettings[clientId] = {
+            ...defaultMemberSettings(),
+            ...state.memberSettings[clientId],
+        };
+    }
 }
 
 function sendTab(message, frameId = 0, tabId = state.tabId) {
@@ -209,12 +254,14 @@ async function connectRoom() {
     }
 
     socket.onopen = () => {
-        state.clientId = crypto.randomUUID();
+        // Keep one ID across reconnects so the room can restore this member's settings.
+        state.clientId ||= crypto.randomUUID();
         socket.send(
             JSON.stringify({
                 type: 'join',
                 room: state.room,
                 clientId: state.clientId,
+                role: state.role,
             }),
         );
 
@@ -242,9 +289,11 @@ async function connectRoom() {
             state.members = [...(message.peers || []), message.clientId];
             state.memberCount = state.members.length;
             state.hostClientId =
-                state.role === 'host'
+                message.hostClientId ||
+                (state.role === 'host'
                     ? message.clientId
-                    : (message.peers || [])[0] || message.clientId;
+                    : (message.peers || [])[0] || message.clientId);
+            mergeRoomMemberSettings(message.memberSettings);
 
             if (state.role !== 'host') state.followingHost = true;
 
@@ -262,6 +311,13 @@ async function connectRoom() {
                     sendRoomEvent('snapshot-request', {
                         navigationId: message.sharedNavigation.id,
                     });
+                    sendRoomEvent('follow-response', {
+                        navigationId: message.sharedNavigation.id,
+                        status: 'following',
+                    });
+                } else if (getMemberSettings(state.clientId).autoFollow) {
+                    state.pendingNavigation = message.sharedNavigation;
+                    chooseNavigation(true, message.sharedNavigation);
                 } else {
                     state.pendingNavigation = message.sharedNavigation;
                     state.followingHost = null;
@@ -280,6 +336,7 @@ async function connectRoom() {
                 state.members.push(message.clientId);
             }
 
+            getMemberSettings(message.clientId);
             state.memberCount = state.members.length;
 
             if (state.sharedNavigation) {
@@ -289,6 +346,12 @@ async function connectRoom() {
                 });
             }
 
+            publish();
+            return;
+        }
+
+        if (message.type === 'host-changed') {
+            state.hostClientId = message.hostClientId || '';
             publish();
             return;
         }
@@ -322,6 +385,41 @@ async function connectRoom() {
 }
 
 function handleRoomEvent(message) {
+    if (message.event === 'member-settings') {
+        const targetClientId = message.payload?.targetClientId;
+        const updates = message.payload?.settings || {};
+        const isHostUpdate = message.from === state.hostClientId;
+        const isOwnAutoFollowUpdate =
+            message.from === targetClientId &&
+            (targetClientId === state.clientId || state.role === 'host');
+
+        // The host may edit any member. A member may only update their own auto-follow option.
+        if (!targetClientId || (!isHostUpdate && !isOwnAutoFollowUpdate)) return;
+
+        const allowedKeys = isHostUpdate
+            ? ['canControlPlayback', 'canSeek', 'autoFollow']
+            : ['autoFollow'];
+        const currentSettings = getMemberSettings(targetClientId);
+
+        for (const key of allowedKeys) {
+            if (typeof updates[key] === 'boolean') {
+                currentSettings[key] = updates[key];
+            }
+        }
+
+        if (
+            targetClientId === state.clientId &&
+            updates.autoFollow === true &&
+            state.pendingNavigation
+        ) {
+            void chooseNavigation(true, state.pendingNavigation);
+            return;
+        }
+
+        publish();
+        return;
+    }
+
     if (
         message.event === 'navigate' &&
         message.from === state.hostClientId &&
@@ -331,10 +429,16 @@ function handleRoomEvent(message) {
 
         state.pendingNavigation = message.payload;
         state.sharedNavigation = message.payload;
-        state.followingHost = null;
         state.followResponses = state.members
             .filter((clientId) => clientId !== state.hostClientId)
             .map((clientId) => ({ clientId, status: 'pending' }));
+
+        if (getMemberSettings(state.clientId).autoFollow) {
+            void chooseNavigation(true, message.payload);
+            return;
+        }
+
+        state.followingHost = null;
 
         publish();
         notifyNavigation(message.payload);
@@ -384,6 +488,11 @@ function handleRoomEvent(message) {
             );
 
             if (response && response.status !== 'following') return;
+
+            const memberSettings = getMemberSettings(message.from);
+            if (!canSendPlaybackAction(memberSettings, message.payload?.action)) {
+                return;
+            }
         }
 
         if (state.videoReady && state.tabId !== null) {
@@ -393,6 +502,54 @@ function handleRoomEvent(message) {
             );
         }
     }
+}
+
+async function chooseNavigation(shouldFollow, navigation) {
+    const responseStatus = shouldFollow ? 'following' : 'not-following';
+
+    clearNavigationNotification(navigation.id);
+    state.pendingNavigation = null;
+    state.followingHost = !!shouldFollow;
+    state.status = shouldFollow
+        ? '正在跟随主机，视频页加载后会自动同步。'
+        : '已选择不跟随主机。';
+    state.followResponses = state.followResponses.filter(
+        (response) => response.clientId !== state.clientId,
+    );
+    state.followResponses.push({
+        clientId: state.clientId,
+        status: responseStatus,
+    });
+
+    if (shouldFollow) {
+        state.currentVideoUrl = navigation.url;
+        state.videoReady = false;
+
+        let tabExists = false;
+        if (state.tabId !== null) {
+            try {
+                await chrome.tabs.get(state.tabId);
+                tabExists = true;
+            } catch {
+                // The old video tab may have been closed; open a new one below.
+            }
+        }
+
+        if (tabExists) {
+            chrome.tabs.update(state.tabId, { url: navigation.url });
+        } else {
+            chrome.tabs.create({ url: navigation.url }, (tab) => {
+                state.tabId = tab.id;
+                publish();
+            });
+        }
+    }
+
+    publish();
+    sendRoomEvent('follow-response', {
+        navigationId: navigation.id,
+        status: responseStatus,
+    });
 }
 
 function hostPageDetected(tabId, candidate) {
@@ -517,6 +674,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 return;
             }
 
+            const action = message.videoState?.action;
+            const ownSettings = getMemberSettings(state.clientId);
+
+            if (
+                state.role !== 'host' &&
+                !message.snapshot &&
+                !canSendPlaybackAction(ownSettings, action)
+            ) {
+                return;
+            }
+
             // Followers send control actions, but their periodic clock samples and
             // in-progress seek samples can fight the host's own playback state.
             if (
@@ -581,47 +749,59 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
         if (message.type === 'FOLLOW_DECISION' && state.pendingNavigation) {
             const navigation = state.pendingNavigation;
-            const status = message.follow ? 'following' : 'not-following';
+            await chooseNavigation(message.follow, navigation);
+            return;
+        }
 
-            clearNavigationNotification(navigation.id);
-            state.pendingNavigation = null;
-            state.followingHost = !!message.follow;
-            state.status = message.follow
-                ? '正在跟随主机，视频页加载后会自动同步。'
-                : '已选择不跟随主机。';
-            state.followResponses = state.followResponses.filter(
-                (response) => response.clientId !== state.clientId,
-            );
-            state.followResponses.push({ clientId: state.clientId, status });
+        if (
+            message.type === 'SET_AUTO_FOLLOW' &&
+            state.role !== 'host' &&
+            state.connected &&
+            state.clientId
+        ) {
+            const settings = getMemberSettings(state.clientId);
+            settings.autoFollow = !!message.enabled;
 
-            if (message.follow) {
-                state.currentVideoUrl = navigation.url;
-                state.videoReady = false;
-
-                let tabExists = false;
-                if (state.tabId !== null) {
-                    try {
-                        await chrome.tabs.get(state.tabId);
-                        tabExists = true;
-                    } catch {
-                        // The old video tab may have been closed; open a new one below.
-                    }
-                }
-
-                if (tabExists) {
-                    chrome.tabs.update(state.tabId, { url: navigation.url });
-                } else {
-                    chrome.tabs.create({ url: navigation.url }, (tab) => {
-                        state.tabId = tab.id;
-                        publish();
-                    });
-                }
+            if (settings.autoFollow && state.pendingNavigation) {
+                void chooseNavigation(true, state.pendingNavigation);
+            } else {
+                publish();
             }
 
+            sendRoomEvent('member-settings', {
+                targetClientId: state.clientId,
+                settings: { autoFollow: settings.autoFollow },
+            });
+            return;
+        }
+
+        if (
+            message.type === 'UPDATE_MEMBER_SETTINGS' &&
+            state.role === 'host' &&
+            state.connected
+        ) {
+            const { targetClientId, key, value } = message;
+            const allowedKeys = [
+                'canControlPlayback',
+                'canSeek',
+                'autoFollow',
+            ];
+
+            if (
+                !state.members.includes(targetClientId) ||
+                targetClientId === state.clientId ||
+                !allowedKeys.includes(key)
+            ) {
+                return;
+            }
+
+            const settings = getMemberSettings(targetClientId);
+            settings[key] = !!value;
+
             publish();
-            sendRoomEvent('follow-response', {
-                navigationId: navigation.id,
-                status,
+            sendRoomEvent('member-settings', {
+                targetClientId,
+                settings: { [key]: settings[key] },
             });
             return;
         }
@@ -649,6 +829,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.clientId = '';
             state.hostClientId = '';
             state.members = [];
+            state.memberSettings = {};
             state.memberCount = 0;
             state.dataConnections = 0;
             state.pendingNavigation = null;
@@ -677,7 +858,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const frame = selectVideoFrame(state.tabId);
             state.videoReady = !!frame;
             state.clientId = '';
+            state.hostClientId = '';
             state.memberCount = 0;
+            state.members = [];
+            state.memberSettings = {};
             state.dataConnections = 0;
             state.pendingNavigation = null;
             state.sharedNavigation = null;
@@ -700,9 +884,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.room = '';
             state.role = '';
             state.clientId = '';
+            state.hostClientId = '';
             state.connected = false;
             state.memberCount = 0;
             state.dataConnections = 0;
+            state.members = [];
+            state.memberSettings = {};
             state.pendingNavigation = null;
             state.sharedNavigation = null;
             state.followResponses = [];
