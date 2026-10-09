@@ -2,6 +2,7 @@ const getElement = (id) => document.getElementById(id);
 const statusElement = getElement('status');
 let renderedHistorySignature = '';
 let currentPlayback = null;
+let lastRenderedState = null;
 
 function formatPlaybackTime(seconds) {
     const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -121,6 +122,86 @@ function renderHostMemberSettings(state) {
     );
 }
 
+function renderInjectionDebug(state) {
+    const panel = getElement('injection-debug');
+    const list = getElement('injection-debug-list');
+
+    panel.classList.toggle('hidden', state.role !== 'host');
+    if (state.role !== 'host') return;
+
+    list.replaceChildren();
+
+    for (const [index, clientId] of (state.members || []).entries()) {
+        const report = state.memberInjectionStatus?.[clientId];
+        const isFresh =
+            !!report && Date.now() - Number(report.receivedAt || 0) < 15_000;
+        const isRefreshing = report?.refreshing && isFresh;
+        let statusLabel = '等待成员上报';
+
+        if (isRefreshing) {
+            statusLabel = '重新注入中';
+        } else if (report?.refreshError) {
+            statusLabel = '重新注入失败';
+        } else if (report?.refreshing) {
+            statusLabel = '刷新请求超时';
+        } else if (report && !isFresh) {
+            statusLabel = '无响应：脚本未注入、页面受限或连接中断';
+        } else if (isFresh && !report.responsive) {
+            statusLabel = '暂未收到标签页内容脚本响应';
+        } else if (isFresh && report.hasVideo && report.videoBound) {
+            statusLabel = `已注入 · 视频监听已绑定 (#${report.videoBindingId || 1})`;
+        } else if (isFresh && report.hasVideo) {
+            statusLabel = '已注入 · 找到视频，但监听未绑定';
+        } else if (isFresh) {
+            statusLabel = '已注入 · 当前标签页未检测到视频';
+        }
+
+        const row = document.createElement('div');
+        row.className = 'injection-debug-row';
+
+        const heading = document.createElement('div');
+        heading.className = 'injection-debug-heading';
+
+        const memberName = document.createElement('strong');
+        memberName.textContent =
+            clientId === state.hostClientId ? '主机' : `成员 ${index + 1}`;
+
+        const result = document.createElement('span');
+        result.textContent = statusLabel;
+        heading.append(memberName, result);
+
+        const detail = document.createElement('div');
+        detail.className = 'injection-debug-detail';
+        const pageDescription = report?.pageTitle || '未获取页面标题';
+        const siteDescription = report?.site ? ` · ${report.site}` : '';
+        const frameDescription = report?.frameCount
+            ? ` · ${report.frameCount} 个 frame`
+            : '';
+        detail.textContent = report
+            ? `${pageDescription}${siteDescription}${frameDescription}`
+            : '等待该成员扩展发送状态';
+
+        const actions = document.createElement('div');
+        actions.className = 'injection-debug-actions';
+
+        const refreshButton = document.createElement('button');
+        refreshButton.type = 'button';
+        refreshButton.className = 'quiet';
+        refreshButton.textContent = isRefreshing ? '处理中…' : '重新注入';
+        refreshButton.disabled = !state.connected || !!isRefreshing;
+        refreshButton.addEventListener('click', () => {
+            chrome.runtime.sendMessage({
+                type: 'REFRESH_MEMBER_INJECTION',
+                clientId,
+            });
+        });
+
+        actions.append(refreshButton);
+        row.append(heading, detail, actions);
+        list.append(row);
+    }
+}
+
 function renderShareHistory(history = []) {
     const panel = getElement('share-history');
     const recentList = getElement('recent-share-list');
@@ -215,6 +296,7 @@ function saveConfig() {
 }
 
 function render(state) {
+    lastRenderedState = state;
     currentPlayback = state.currentPlayback || null;
     renderPlaybackProgress();
 
@@ -243,6 +325,7 @@ function render(state) {
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = false;
         renderHostMemberSettings(state);
+        renderInjectionDebug(state);
 
         const autoPause = state.autoPause || { enabled: false, duration: 5 };
         const isHost = state.role === 'host';
@@ -299,6 +382,7 @@ function render(state) {
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = true;
         getElement('host-member-settings').classList.add('hidden');
+        getElement('injection-debug').classList.add('hidden');
         getElement('auto-pause-panel').classList.add('hidden');
         getElement('share-history').classList.add('hidden');
     }
@@ -337,6 +421,11 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Advance the displayed clock while the popup is open between room updates.
 setInterval(renderPlaybackProgress, 1000);
+setInterval(() => {
+    if (lastRenderedState?.role === 'host') {
+        renderInjectionDebug(lastRenderedState);
+    }
+}, 1000);
 
 getElement('server').addEventListener('change', () => {
     saveConfig();

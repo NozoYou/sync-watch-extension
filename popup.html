@@ -122,6 +122,16 @@
                 <div id="member-settings-list"></div>
             </section>
 
+            <!-- DEBUG ZONE: keep injection diagnostics and reinjection tools isolated. -->
+            <details id="injection-debug" class="injection-debug hidden">
+                <summary>调试区：注入状态与重新注入</summary>
+                <p class="small">
+                    显示成员脚本心跳和视频监听状态。重新注入不会退出房间，
+                    但会替换当前标签页中的扩展监听器。
+                </p>
+                <div id="injection-debug-list"></div>
+            </details>
+
             <div id="navigation-panel" class="navigation-panel hidden">
                 <strong id="navigation-title"></strong>
                 <a id="navigation-url" target="_blank" rel="noreferrer"></a>

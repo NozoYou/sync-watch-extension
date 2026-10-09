@@ -5,6 +5,7 @@ let pingTimer = null;
 let reconnectTimer = null;
 
 const videoFrames = new Map();
+const injectionFrames = new Map();
 const navigationNotificationPrefix = 'sync-watch-navigation-';
 
 const state = {
@@ -27,6 +28,7 @@ const state = {
     hostClientId: '',
     members: [],
     memberSettings: {},
+    memberInjectionStatus: {},
     navigationHistory: [],
     autoPause: { enabled: false, duration: 5 },
     autoPauseReady: [],
@@ -203,6 +205,88 @@ function sendRoomEvent(event, payload) {
     if (socket?.readyState !== WebSocket.OPEN) return;
 
     socket.send(JSON.stringify({ type: 'room-event', event, payload }));
+}
+
+function publishInjectionStatus() {
+    if (!state.room || !state.connected || !state.clientId) return;
+
+    const now = Date.now();
+    const activeFrames = [...injectionFrames.values()].filter(
+        (frame) =>
+            frame.tabId === state.tabId &&
+            now - frame.reportedAt < 12_000,
+    );
+    const bestFrame = activeFrames
+        .filter((frame) => frame.hasVideo)
+        .sort((a, b) => Number(b.videoBound) - Number(a.videoBound))[0];
+    const status = {
+        responsive: activeFrames.length > 0,
+        frameCount: activeFrames.length,
+        hasVideo: activeFrames.some((frame) => frame.hasVideo),
+        videoBound: activeFrames.some((frame) => frame.videoBound),
+        readyState: bestFrame?.readyState || 0,
+        videoBindingId: bestFrame?.videoBindingId || 0,
+        pageTitle: bestFrame?.pageTitle || activeFrames[0]?.pageTitle || '',
+        site: bestFrame?.site || activeFrames[0]?.site || '',
+        reportedAt: now,
+    };
+
+    state.memberInjectionStatus[state.clientId] = {
+        ...status,
+        receivedAt: now,
+    };
+    sendRoomEvent('injection-status', status);
+    publish();
+}
+
+async function reinjectRoomTab() {
+    if (state.tabId === null) {
+        throw new Error('当前房间没有可刷新的标签页。');
+    }
+
+    // Discard old frame heartbeats so the UI waits for the new script instance.
+    for (const [key, frame] of injectionFrames) {
+        if (frame.tabId === state.tabId) injectionFrames.delete(key);
+    }
+
+    const injectedFrames = await chrome.scripting.executeScript({
+        target: { tabId: state.tabId, allFrames: true },
+        files: ['content.js'],
+    });
+
+    setTabMarker(state.tabId, true);
+    state.status = '重新注入已执行，正在等待页面状态回报。';
+    publish();
+    return injectedFrames.length;
+}
+
+async function handleReinjectionRequest(clientId) {
+    state.memberInjectionStatus[clientId] = {
+        refreshing: true,
+        receivedAt: Date.now(),
+    };
+
+    if (clientId !== state.clientId) {
+        sendRoomEvent('refresh-member-injection', {
+            targetClientId: clientId,
+        });
+        publish();
+        return;
+    }
+
+    publish();
+
+    try {
+        await reinjectRoomTab();
+    } catch (error) {
+        state.memberInjectionStatus[clientId] = {
+            refreshing: false,
+            refreshError: String(error?.message || error).slice(0, 160),
+            receivedAt: Date.now(),
+        };
+        state.status = '重新注入失败；请检查页面是否允许扩展访问。';
+        publish();
+    }
 }
 
 function addNavigationToHistory(navigation) {
@@ -416,6 +500,7 @@ async function connectRoom() {
             state.connected = true;
             state.roomLimit = message.limit || 4;
             state.members = [...(message.peers || []), message.clientId];
+            state.memberInjectionStatus = {};
             state.memberCount = state.members.length;
             state.hostClientId =
                 message.hostClientId ||
@@ -463,6 +548,8 @@ async function connectRoom() {
                 sendTab({ type: 'ROOM_CONNECTED', role: state.role });
                 setTabMarker(state.tabId, true);
             }
+
+            publishInjectionStatus();
 
             if (state.role !== 'host' && message.sharedNavigation) {
                 state.sharedNavigation = message.sharedNavigation;
@@ -521,6 +608,7 @@ async function connectRoom() {
 
         if (message.type === 'peer-left') {
             state.members = state.members.filter((id) => id !== message.clientId);
+            delete state.memberInjectionStatus[message.clientId];
             state.memberCount = state.members.length;
             state.followResponses = state.followResponses.filter(
                 (response) => response.clientId !== message.clientId,
@@ -552,6 +640,45 @@ async function connectRoom() {
 }
 
 function handleRoomEvent(message) {
+    if (
+        message.event === 'refresh-member-injection' &&
+        message.payload?.targetClientId === state.clientId
+    ) {
+        reinjectRoomTab().catch((error) => {
+            const refreshError = String(error?.message || error).slice(0, 160);
+            state.memberInjectionStatus[state.clientId] = {
+                refreshing: false,
+                refreshError,
+                receivedAt: Date.now(),
+            };
+            sendRoomEvent('injection-status', {
+                responsive: false,
+                frameCount: 0,
+                hasVideo: false,
+                videoBound: false,
+                readyState: 0,
+                videoBindingId: 0,
+                pageTitle: '',
+                site: '',
+                refreshError,
+            });
+            publish();
+        });
+        return;
+    }
+
+    if (
+        message.event === 'injection-status' &&
+        state.members.includes(message.from)
+    ) {
+        state.memberInjectionStatus[message.from] = {
+            ...message.payload,
+            receivedAt: Date.now(),
+        };
+        publish();
+        return;
+    }
+
     if (message.event === 'history-sync' && message.from === state.hostClientId) {
         mergeNavigationHistory(message.payload?.history || []);
         publish();
@@ -877,6 +1004,50 @@ async function inspectActiveTab(tabId) {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
     ready.then(async () => {
+        if (message.type === 'REFRESH_MY_INJECTION') {
+            if (state.room && state.clientId) {
+                await handleReinjectionRequest(state.clientId);
+            }
+            return;
+        }
+
+        if (message.type === 'REFRESH_MEMBER_INJECTION') {
+            const targetClientId = String(message.clientId || '');
+            const isSelf = targetClientId === state.clientId;
+            const canRefreshMember =
+                state.role === 'host' && state.members.includes(targetClientId);
+
+            if (isSelf || canRefreshMember) {
+                await handleReinjectionRequest(targetClientId);
+            }
+            return;
+        }
+
+        if (
+            message.type === 'INJECTION_STATUS' &&
+            sender.tab?.id !== undefined
+        ) {
+            const tabId = sender.tab.id;
+            const frameId = sender.frameId || 0;
+            const status = message.status || {};
+
+            injectionFrames.set(`${tabId}:${frameId}`, {
+                tabId,
+                frameId,
+                injected: status.injected === true,
+                hasVideo: status.hasVideo === true,
+                videoBound: status.videoBound === true,
+                readyState: Number(status.readyState) || 0,
+                videoBindingId: Number(status.videoBindingId) || 0,
+                pageTitle: String(status.pageTitle || '').slice(0, 160),
+                site: String(status.site || '').slice(0, 120),
+                reportedAt: Date.now(),
+            });
+
+            if (tabId === state.tabId) publishInjectionStatus();
+            return;
+        }
+
         if (message.type === 'VIDEO_FRAME' && sender.tab?.id !== undefined) {
             const tabId = sender.tab.id;
             const frameId = sender.frameId || 0;
@@ -1148,6 +1319,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.clientId = '';
             state.hostClientId = '';
             state.members = [];
+            state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
@@ -1204,6 +1376,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.hostClientId = '';
             state.memberCount = 0;
             state.members = [];
+            state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
@@ -1233,6 +1406,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberCount = 0;
             state.dataConnections = 0;
             state.members = [];
+            state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };

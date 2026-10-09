@@ -206,9 +206,67 @@ button:hover {
 .auto-follow-control,
 .tab-marker-control,
 .host-member-settings,
+.injection-debug,
 .auto-pause-panel,
 .share-history {
     margin-top: 10px;
+}
+
+/* DEBUG ZONE: diagnostic and reinjection UI is intentionally self-contained. */
+.injection-debug {
+    padding: 9px;
+    border: 1px dashed #7766f5;
+    border-radius: 8px;
+    background: #1c1d30;
+}
+
+.injection-debug summary {
+    color: #c4cada;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.injection-debug .small {
+    margin-left: 0;
+}
+
+.injection-debug-row {
+    margin-top: 7px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
+.injection-debug-heading {
+    display: flex;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 8px;
+    color: #dedaff;
+    font-size: 10px;
+}
+
+.injection-debug-heading span {
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.injection-debug-detail {
+    margin-top: 3px;
+    color: #aab1c2;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+
+.injection-debug-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.injection-debug-actions button {
+    padding: 4px 7px;
+    font-size: 10px;
 }
 
 .auto-pause-duration-row {

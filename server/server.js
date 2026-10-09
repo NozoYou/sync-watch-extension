@@ -209,6 +209,8 @@ webSocketServer.on('connection', (webSocket) => {
                 'auto-pause-ready',
                 'auto-pause-start',
                 'history-sync',
+                'injection-status',
+                'refresh-member-injection',
             ]);
 
             if (
@@ -228,7 +230,57 @@ webSocketServer.on('connection', (webSocket) => {
                 }
             }
 
+            if (message.event === 'injection-status') {
+                const status = message.payload;
+                message.payload = {
+                    responsive: status.responsive === true,
+                    frameCount: Math.max(
+                        0,
+                        Math.min(100, Number(status.frameCount) || 0),
+                    ),
+                    hasVideo: status.hasVideo === true,
+                    videoBound: status.videoBound === true,
+                    readyState: Math.max(
+                        0,
+                        Math.min(4, Number(status.readyState) || 0),
+                    ),
+                    videoBindingId: Math.max(
+                        0,
+                        Number(status.videoBindingId) || 0,
+                    ),
+                    pageTitle: String(status.pageTitle || '').slice(0, 160),
+                    site: String(status.site || '').slice(0, 120),
+                    refreshError: String(status.refreshError || '').slice(0, 160),
+                };
+            }
+
             const room = rooms.get(webSocket.room);
+
+            if (message.event === 'refresh-member-injection') {
+                const targetClientId = String(
+                    message.payload.targetClientId || '',
+                );
+                const target = room?.get(targetClientId);
+
+                // Only the room host can request reinjection on another member's tab.
+                if (
+                    webSocket.clientId !== room?.hostClientId ||
+                    !target ||
+                    target.readyState !== WebSocket.OPEN
+                ) {
+                    return;
+                }
+
+                target.send(
+                    JSON.stringify({
+                        type: 'room-event',
+                        from: webSocket.clientId,
+                        event: message.event,
+                        payload: { targetClientId },
+                    }),
+                );
+                return;
+            }
 
             if (message.event === 'room-settings') {
                 if (webSocket.clientId !== room.hostClientId) return;
@@ -366,7 +418,12 @@ webSocketServer.on('connection', (webSocket) => {
 
             // The server relays signaling data only; it never receives video media.
             for (const peer of room?.values() || []) {
-                if (peer !== webSocket && peer.readyState === WebSocket.OPEN) {
+                if (
+                    peer !== webSocket &&
+                    peer.readyState === WebSocket.OPEN &&
+                    (message.event !== 'injection-status' ||
+                        peer.clientId === room.hostClientId)
+                ) {
                     peer.send(roomEvent);
                 }
             }

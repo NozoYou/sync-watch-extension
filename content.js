@@ -1,14 +1,21 @@
 (() => {
-    // Avoid installing duplicate listeners if the page injects this script again.
-    if (window.__syncWatchLoaded) return;
+    // Cleanly replace old listeners when the host requests a reinjection.
+    if (window.__syncWatchLoaded) {
+        window.__syncWatchCleanup?.();
+        if (window.__syncWatchLoaded) return;
+    }
     window.__syncWatchLoaded = true;
 
     const isTop = window === window.top;
     const expectedMediaEvents = new WeakMap();
+    const pageEventController = new AbortController();
 
     let video = null;
+    let videoBindingId = 0;
     let lastTimeSent = 0;
     let lastFrameReport = '';
+    let lastInjectionSignature = '';
+    let lastInjectionReportAt = 0;
     let role = '';
     let autoPauseTimer = null;
     let lastAutoPauseId = '';
@@ -17,6 +24,8 @@
     let originalPageTitle = '';
     let decoratedPageTitle = '';
     let tabMarkerObserver = null;
+    let pageObserver = null;
+    let reportInterval = null;
 
     const tabTitlePrefix = '[一起看] ';
     const tabIconId = '__sync_watch_tab_icon';
@@ -129,25 +138,62 @@
         if (!currentVideo || currentVideo === video) return;
 
         video = currentVideo;
+        videoBindingId += 1;
 
         for (const eventName of ['play', 'pause', 'seeked', 'ratechange']) {
             video.addEventListener(
                 eventName,
                 () => sendVideo(currentVideo, eventName),
-                { passive: true },
+                { passive: true, signal: pageEventController.signal },
             );
         }
 
         currentVideo.addEventListener(
             'seeking',
             () => sendVideo(currentVideo, 'seeking'),
-            { passive: true },
+            { passive: true, signal: pageEventController.signal },
         );
         currentVideo.addEventListener(
             'timeupdate',
             () => sendVideo(currentVideo, currentVideo.seeking ? 'seeking' : 'time'),
-            { passive: true },
+            { passive: true, signal: pageEventController.signal },
         );
+    }
+
+    // Report script health separately from video-frame discovery.
+    function reportInjectionStatus(force = false) {
+        const currentVideo = chooseVideo();
+        if (currentVideo && currentVideo !== video) bind(currentVideo);
+
+        const status = {
+            injected: true,
+            hasVideo: !!currentVideo,
+            videoBound:
+                !!currentVideo &&
+                video === currentVideo &&
+                currentVideo.isConnected,
+            videoBindingId,
+            readyState: currentVideo?.readyState || 0,
+            pageTitle: (document.title || location.hostname).slice(0, 160),
+            site: location.hostname,
+        };
+        const signature = JSON.stringify(status);
+        const now = Date.now();
+
+        // Send immediately when the player changes, then heartbeat every five seconds.
+        if (
+            !force &&
+            signature === lastInjectionSignature &&
+            now - lastInjectionReportAt < 5000
+        ) {
+            return;
+        }
+
+        lastInjectionSignature = signature;
+        lastInjectionReportAt = now;
+        chrome.runtime
+            .sendMessage({ type: 'INJECTION_STATUS', status })
+            .catch(() => {});
     }
 
     async function applyVideo(remoteState) {
@@ -351,7 +397,7 @@
         document.documentElement.append(root);
     }
 
-    chrome.runtime.onMessage.addListener((message) => {
+    function handleRuntimeMessage(message) {
         if (message.type === 'APPLY_REMOTE_VIDEO') {
             applyVideo(message.videoState);
         } else if (message.type === 'AUTO_PAUSE') {
@@ -368,13 +414,16 @@
         } else if (message.type === 'ROOM_CONNECTED') {
             role = message.role || '';
         }
-    });
+    }
+
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
     if (isTop) chrome.runtime.sendMessage({ type: 'GET_ROLE' });
 
     function reportVideoFrame() {
         const currentVideo = chooseVideo();
         if (currentVideo !== video) bind(currentVideo);
+        reportInjectionStatus();
 
         let score = 0;
         if (currentVideo) {
@@ -407,17 +456,44 @@
     // Watch for players inserted after the page's initial load, including SPA navigation.
     bind(chooseVideo());
     reportVideoFrame();
-    new MutationObserver(() => {
+    reportInjectionStatus(true);
+    pageObserver = new MutationObserver(() => {
         bind(chooseVideo());
         reportVideoFrame();
-    }).observe(document.documentElement, { childList: true, subtree: true });
+    });
+    pageObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+    });
 
     for (const eventName of ['popstate', 'hashchange']) {
-        window.addEventListener(eventName, reportVideoFrame);
+        window.addEventListener(eventName, reportVideoFrame, {
+            signal: pageEventController.signal,
+        });
     }
 
-    setInterval(() => {
+    reportInterval = setInterval(() => {
         if (!video || !video.isConnected) bind(chooseVideo());
         reportVideoFrame();
+        reportInjectionStatus();
     }, 2500);
+
+    // Make repeated executeScript calls safe and prevent duplicate event handlers.
+    window.__syncWatchCleanup = () => {
+        pageEventController.abort();
+        chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+        pageObserver?.disconnect();
+        tabMarkerObserver?.disconnect();
+        clearInterval(reportInterval);
+        clearTimeout(autoPauseTimer);
+        document.getElementById('__sync_watch_prompt')?.remove();
+        document.getElementById(tabIconId)?.remove();
+
+        if (decoratedPageTitle && document.title.startsWith(tabTitlePrefix)) {
+            document.title = originalPageTitle;
+        }
+
+        window.__syncWatchLoaded = false;
+        delete window.__syncWatchCleanup;
+    };
 })();
