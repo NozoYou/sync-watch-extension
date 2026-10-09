@@ -14,6 +14,7 @@ const state = {
     turnCredential: '',
     room: '',
     role: '',
+    modifyTabIcon: false,
     status: '打开视频页面后创建房间，或输入房间码加入。',
     connected: false,
     memberCount: 0,
@@ -47,6 +48,7 @@ const ready = chrome.storage.local
         'turnCredential',
         'room',
         'role',
+        'modifyTabIcon',
         'tabId',
         'videoFrameId',
         'videoReady',
@@ -69,6 +71,7 @@ const ready = chrome.storage.local
 
         if (state.room) {
             state.connected = false;
+            setTabMarker(state.tabId, true);
             setTimeout(() => connectRoom(), 100);
         }
     });
@@ -81,6 +84,7 @@ function persist() {
         turnCredential: state.turnCredential,
         room: state.room,
         role: state.role,
+        modifyTabIcon: state.modifyTabIcon,
         status: state.status,
         connected: state.connected,
         memberCount: state.memberCount,
@@ -162,6 +166,34 @@ function sendTab(message, frameId = 0, tabId = state.tabId) {
     if (tabId === null || tabId === undefined) return;
 
     chrome.tabs.sendMessage(tabId, message, { frameId }).catch(() => {});
+}
+
+function setTabMarker(tabId, enabled) {
+    if (tabId === null || tabId === undefined) return;
+
+    sendTab(
+        {
+            type: 'SET_TAB_MARKER',
+            enabled: !!enabled,
+            modifyIcon: !!enabled && state.modifyTabIcon,
+        },
+        0,
+        tabId,
+    );
+}
+
+function switchRoomTab(tabId) {
+    const previousTabId = state.tabId;
+
+    if (previousTabId !== null && previousTabId !== tabId) {
+        setTabMarker(previousTabId, false);
+    }
+
+    state.tabId = tabId ?? null;
+
+    if (state.room && state.tabId !== null) {
+        setTabMarker(state.tabId, true);
+    }
 }
 
 function sendRoomEvent(event, payload) {
@@ -426,6 +458,7 @@ async function connectRoom() {
 
             if (state.tabId !== null) {
                 sendTab({ type: 'ROOM_CONNECTED', role: state.role });
+                setTabMarker(state.tabId, true);
             }
 
             if (state.role !== 'host' && message.sharedNavigation) {
@@ -726,7 +759,7 @@ async function chooseNavigation(shouldFollow, navigation) {
             chrome.tabs.update(state.tabId, { url: navigation.url });
         } else {
             chrome.tabs.create({ url: navigation.url }, (tab) => {
-                state.tabId = tab.id;
+                switchRoomTab(tab.id);
                 publish();
             });
         }
@@ -747,9 +780,23 @@ function hostPageDetected(tabId, candidate) {
 
     if (!state.currentVideoUrl) {
         state.currentVideoUrl = pageUrl;
-        state.tabId = tabId;
+        switchRoomTab(tabId);
         state.videoFrameId = candidate.frameId;
         state.videoReady = true;
+
+        if (!state.sharedNavigation) {
+            state.sharedNavigation = {
+                id: crypto.randomUUID(),
+                url: pageUrl,
+                title: candidate.title || '当前视频',
+            };
+            addNavigationToHistory(state.sharedNavigation);
+
+            if (state.connected) {
+                sendRoomEvent('navigate', state.sharedNavigation);
+            }
+        }
+
         publish();
         return;
     }
@@ -760,7 +807,7 @@ function hostPageDetected(tabId, candidate) {
             state.videoFrameId !== candidate.frameId ||
             !state.videoReady
         ) {
-            state.tabId = tabId;
+            switchRoomTab(tabId);
             state.videoFrameId = candidate.frameId;
             state.videoReady = true;
             publish();
@@ -832,6 +879,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             videoFrames.set(key, candidate);
 
             if (tabId === state.tabId) {
+                setTabMarker(tabId, true);
                 const wasReady = state.videoReady;
                 const selected = selectVideoFrame(tabId);
 
@@ -921,7 +969,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const url = safePageUrl(candidate.url);
             if (!url) return;
 
-            state.tabId = candidate.tabId;
+            switchRoomTab(candidate.tabId);
             state.videoFrameId = selected?.frameId ?? candidate.frameId;
             state.videoReady = true;
             state.currentVideoUrl = url;
@@ -951,7 +999,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.hostCandidate &&
             sender.tab?.id === state.hostCandidate.tabId
         ) {
+            setTabMarker(state.tabId, false);
             state.tabId = state.hostCandidate.tabId;
+            setTabMarker(state.tabId, false);
             state.videoFrameId = state.hostCandidate.frameId;
             state.videoReady = false;
             state.hostCandidate = null;
@@ -1041,6 +1091,13 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (message.type === 'SET_TAB_ICON') {
+            state.modifyTabIcon = !!message.enabled;
+            publish();
+            setTabMarker(state.tabId, !!state.room);
+            return;
+        }
+
         if (message.type === 'SAVE_CONFIG') {
             state.server = message.server;
             state.turnUrls = message.turnUrls || '';
@@ -1054,7 +1111,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.server = message.server || state.server;
             state.room = Math.random().toString(36).slice(2, 8).toUpperCase();
             state.role = 'host';
-            state.tabId = message.tabId;
+            switchRoomTab(message.tabId);
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
@@ -1095,13 +1152,20 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (message.type === 'JOIN_ROOM') {
-            state.server = message.server || state.server;
-            state.room = (message.room || '')
+            const roomCode = (message.room || '')
                 .toUpperCase()
                 .replace(/[^A-Z0-9]/g, '')
                 .slice(0, 12);
+
+            if (!roomCode) {
+                setStatus('请输入房间码。');
+                return;
+            }
+
+            state.server = message.server || state.server;
+            state.room = roomCode;
             state.role = 'guest';
-            state.tabId = message.tabId;
+            switchRoomTab(message.tabId);
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = tab?.url || '';
@@ -1123,17 +1187,13 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.followResponses = [];
             state.followingHost = true;
 
-            if (!state.room) {
-                setStatus('请输入房间码。');
-                return;
-            }
-
             publish();
             connectRoom();
             return;
         }
 
         if (message.type === 'LEAVE') {
+            setTabMarker(state.tabId, false);
             disconnectSocket();
             sendTab({ type: 'ROOM_STOP' });
             state.room = '';

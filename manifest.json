@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.8.0",
+    "version": "0.10.0",
     "description": "和最多 4 位朋友同步网页视频播放。",
     "permissions": ["activeTab", "storage", "tabs", "notifications"],
     "host_permissions": ["<all_urls>", "https://*/*", "http://*/*"],
@@ -12,6 +12,12 @@
     "background": {
         "service_worker": "background.js"
     },
+    "web_accessible_resources": [
+        {
+            "resources": ["tab-icon.svg"],
+            "matches": ["<all_urls>"]
+        }
+    ],
     "content_scripts": [
         {
             "matches": ["<all_urls>"],

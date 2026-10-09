@@ -196,6 +196,8 @@ function render(state) {
         getElement('auto-follow').checked = !!
             state.memberSettings?.[state.clientId]?.autoFollow;
         getElement('auto-follow').disabled = !state.connected;
+        getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
+        getElement('modify-tab-icon').disabled = false;
         renderHostMemberSettings(state);
 
         const autoPause = state.autoPause || { enabled: false, duration: 5 };
@@ -249,6 +251,8 @@ function render(state) {
     } else {
         getElement('room-box').classList.add('hidden');
         getElement('auto-follow-control').classList.add('hidden');
+        getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
+        getElement('modify-tab-icon').disabled = true;
         getElement('host-member-settings').classList.add('hidden');
         getElement('auto-pause-panel').classList.add('hidden');
         getElement('share-history').classList.add('hidden');
@@ -270,6 +274,7 @@ chrome.storage.local.get(
         'memberSettings',
         'navigationHistory',
         'autoPause',
+        'modifyTabIcon',
         'role',
         'clientId',
         'hostClientId',
@@ -312,6 +317,13 @@ getElement('auto-follow').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_AUTO_FOLLOW',
         enabled: getElement('auto-follow').checked,
+    });
+});
+
+getElement('modify-tab-icon').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_TAB_ICON',
+        enabled: getElement('modify-tab-icon').checked,
     });
 });
 

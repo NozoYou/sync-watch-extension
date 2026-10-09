@@ -165,6 +165,7 @@ button:hover {
 
 /* Per-member playback permissions and automatic navigation following. */
 .auto-follow-control,
+.tab-marker-control,
 .host-member-settings,
 .auto-pause-panel,
 .share-history {

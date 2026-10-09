@@ -12,6 +12,14 @@
     let role = '';
     let autoPauseTimer = null;
     let lastAutoPauseId = '';
+    let tabMarkerEnabled = false;
+    let tabIconEnabled = false;
+    let originalPageTitle = '';
+    let decoratedPageTitle = '';
+    let tabMarkerObserver = null;
+
+    const tabTitlePrefix = '[一起看] ';
+    const tabIconId = '__sync_watch_tab_icon';
 
     function chooseVideo() {
         const videos = [...document.querySelectorAll('video')];
@@ -200,6 +208,81 @@
         }, Math.max(0, message.resumeAt - Date.now()));
     }
 
+    function updateTabTitle() {
+        if (!isTop) return;
+
+        const currentTitle = document.title || location.hostname;
+
+        if (tabMarkerEnabled) {
+            if (currentTitle === decoratedPageTitle) return;
+
+            const pageTitle = currentTitle.startsWith(tabTitlePrefix)
+                ? currentTitle.slice(tabTitlePrefix.length)
+                : currentTitle;
+            originalPageTitle = pageTitle;
+            decoratedPageTitle = tabTitlePrefix + pageTitle;
+
+            if (currentTitle !== decoratedPageTitle) {
+                document.title = decoratedPageTitle;
+            }
+            return;
+        }
+
+        if (decoratedPageTitle && currentTitle.startsWith(tabTitlePrefix)) {
+            document.title = currentTitle === decoratedPageTitle
+                ? originalPageTitle
+                : currentTitle.slice(tabTitlePrefix.length);
+        }
+
+        decoratedPageTitle = '';
+    }
+
+    function updateTabIcon() {
+        if (!isTop || !document.head) return;
+
+        const existingIcon = document.getElementById(tabIconId);
+        if (!tabIconEnabled) {
+            existingIcon?.remove();
+            return;
+        }
+
+        if (existingIcon) return;
+
+        const icon = document.createElement('link');
+        icon.id = tabIconId;
+        icon.rel = 'icon';
+        icon.type = 'image/svg+xml';
+        icon.href = chrome.runtime.getURL('tab-icon.svg');
+        document.head.append(icon);
+    }
+
+    function updateTabMarker(enabled, modifyIcon) {
+        if (!isTop) return;
+
+        tabMarkerEnabled = !!enabled;
+        tabIconEnabled = tabMarkerEnabled && !!modifyIcon;
+        updateTabTitle();
+        updateTabIcon();
+
+        if (tabMarkerEnabled) {
+            if (!tabMarkerObserver && document.head) {
+                tabMarkerObserver = new MutationObserver(() => {
+                    updateTabTitle();
+                    updateTabIcon();
+                });
+                tabMarkerObserver.observe(document.head, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true,
+                });
+            }
+            return;
+        }
+
+        tabMarkerObserver?.disconnect();
+        tabMarkerObserver = null;
+    }
+
     function showPrompt(kind, data) {
         if (!isTop) return;
 
@@ -266,6 +349,8 @@
             applyVideo(message.videoState);
         } else if (message.type === 'AUTO_PAUSE') {
             applyAutomaticPause(message);
+        } else if (message.type === 'SET_TAB_MARKER') {
+            updateTabMarker(message.enabled, message.modifyIcon);
         } else if (message.type === 'SHOW_HOST_PROMPT') {
             showPrompt('host', message);
         } else if (message.type === 'HIDE_ROOM_PROMPT') {
