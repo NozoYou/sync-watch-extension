@@ -1,0 +1,20 @@
+# Copy to /etc/turnserver.conf and replace every example value.
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+lt-cred-mech
+realm=sync.example.com
+server-name=sync.example.com
+user=syncwatch:REPLACE_WITH_A_LONG_RANDOM_PASSWORD
+min-port=49160
+max-port=49200
+no-multicast-peers
+no-cli
+log-file=stdout
+
+# Configure a real certificate before enabling TLS:
+cert=/etc/letsencrypt/live/sync.example.com/fullchain.pem
+pkey=/etc/letsencrypt/live/sync.example.com/privkey.pem
+
+# If the VM is behind 1:1 NAT, set the mapping explicitly:
+# external-ip=PUBLIC_IP/PRIVATE_IP
