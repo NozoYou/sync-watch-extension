@@ -30,6 +30,8 @@
     let bufferingVideo = null;
     let bufferingReported = false;
     let lastBufferingReportAt = 0;
+    let bufferingCandidate = null;
+    let bufferingDelaySeconds = 5;
     const bufferingPauseStates = new WeakMap();
 
     const tabTitlePrefix = '[一起看] ';
@@ -143,6 +145,9 @@
         if (!currentVideo || currentVideo === video) return;
 
         if (bufferingReported) reportBufferingStatus(false, bufferingVideo);
+        clearTimeout(bufferingTimer);
+        bufferingTimer = null;
+        bufferingCandidate = null;
 
         video = currentVideo;
         videoBindingId += 1;
@@ -150,7 +155,19 @@
         for (const eventName of ['play', 'pause', 'seeked', 'ratechange']) {
             video.addEventListener(
                 eventName,
-                () => sendVideo(currentVideo, eventName),
+                () => {
+                    if (
+                        eventName === 'pause' &&
+                        !bufferingReported &&
+                        bufferingCandidate === currentVideo
+                    ) {
+                        clearTimeout(bufferingTimer);
+                        bufferingTimer = null;
+                        bufferingCandidate = null;
+                    }
+
+                    sendVideo(currentVideo, eventName);
+                },
                 { passive: true, signal: pageEventController.signal },
             );
         }
@@ -194,11 +211,15 @@
     }
 
     function scheduleBufferingStatus(currentVideo) {
-        clearTimeout(bufferingTimer);
         if (currentVideo.paused) return;
+        if (bufferingCandidate === currentVideo && bufferingTimer !== null) return;
 
-        // Ignore very short waits; they are common during normal playback.
+        bufferingCandidate = currentVideo;
+
+        // Wait for the room's configured interval before treating this as a stall.
         bufferingTimer = setTimeout(() => {
+            bufferingTimer = null;
+
             if (
                 currentVideo !== chooseVideo() ||
                 currentVideo.paused ||
@@ -210,11 +231,13 @@
             if (!bufferingReported) {
                 reportBufferingStatus(true, currentVideo);
             }
-        }, 1200);
+        }, bufferingDelaySeconds * 1000);
     }
 
     function clearBufferingStatus(currentVideo) {
         clearTimeout(bufferingTimer);
+        bufferingTimer = null;
+        if (bufferingCandidate === currentVideo) bufferingCandidate = null;
         if (bufferingReported && bufferingVideo === currentVideo) {
             reportBufferingStatus(false, currentVideo);
         }
@@ -506,6 +529,20 @@
             if (currentVideo) sendVideo(currentVideo, 'snapshot', true);
         } else if (message.type === 'ROOM_CONNECTED') {
             role = message.role || '';
+            bufferingDelaySeconds = [3, 5].includes(message.bufferingDelay)
+                ? message.bufferingDelay
+                : 5;
+        } else if (message.type === 'BUFFERING_SETTINGS') {
+            bufferingDelaySeconds = [3, 5].includes(message.delay)
+                ? message.delay
+                : 5;
+
+            // Reapply a changed delay to an in-progress, not-yet-reported stall.
+            if (bufferingCandidate && !bufferingReported) {
+                clearTimeout(bufferingTimer);
+                bufferingTimer = null;
+                scheduleBufferingStatus(bufferingCandidate);
+            }
         }
     }
 

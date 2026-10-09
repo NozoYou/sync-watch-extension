@@ -34,6 +34,7 @@ const state = {
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
     pauseOnBuffer: false,
+    pauseOnBufferDelay: 5,
     bufferingMembers: [],
     bufferPause: null,
     currentVideoUrl: '',
@@ -67,6 +68,7 @@ const ready = chrome.storage.local
         'autoPauseReady',
         'autoPauseStartedNavigationId',
         'pauseOnBuffer',
+        'pauseOnBufferDelay',
         'bufferingMembers',
         'bufferPause',
         'currentVideoUrl',
@@ -112,6 +114,7 @@ function persist() {
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         pauseOnBuffer: state.pauseOnBuffer,
+        pauseOnBufferDelay: state.pauseOnBufferDelay,
         bufferingMembers: state.bufferingMembers,
         bufferPause: state.bufferPause,
         currentVideoUrl: state.currentVideoUrl,
@@ -583,6 +586,11 @@ async function connectRoom() {
             ]);
             state.autoPause = message.autoPause || { enabled: false, duration: 5 };
             state.pauseOnBuffer = message.pauseOnBuffer === true;
+            state.pauseOnBufferDelay = [3, 5].includes(
+                message.pauseOnBufferDelay,
+            )
+                ? message.pauseOnBufferDelay
+                : 5;
             state.autoPauseReady = [];
             state.bufferingMembers = [];
             state.bufferPause = null;
@@ -615,7 +623,11 @@ async function connectRoom() {
             setStatus('房间连接已建立。');
 
             if (state.tabId !== null) {
-                sendTab({ type: 'ROOM_CONNECTED', role: state.role });
+                sendTab({
+                    type: 'ROOM_CONNECTED',
+                    role: state.role,
+                    bufferingDelay: state.pauseOnBufferDelay,
+                });
                 setTabMarker(state.tabId, true);
             }
 
@@ -765,6 +777,18 @@ function handleRoomEvent(message) {
             duration: message.payload?.autoPause?.duration || 5,
         };
         state.pauseOnBuffer = message.payload?.pauseOnBuffer === true;
+        state.pauseOnBufferDelay = [3, 5].includes(
+            message.payload?.pauseOnBufferDelay,
+        )
+            ? message.payload.pauseOnBufferDelay
+            : 5;
+        sendTab(
+            {
+                type: 'BUFFERING_SETTINGS',
+                delay: state.pauseOnBufferDelay,
+            },
+            state.videoFrameId,
+        );
         if (!state.pauseOnBuffer) {
             state.bufferingMembers = [];
             finishBufferingPause();
@@ -1435,6 +1459,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             sendRoomEvent('room-settings', {
                 autoPause: state.autoPause,
                 pauseOnBuffer: state.pauseOnBuffer,
+                pauseOnBufferDelay: state.pauseOnBufferDelay,
             });
             return;
         }
@@ -1445,6 +1470,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.connected
         ) {
             state.pauseOnBuffer = !!message.enabled;
+            state.pauseOnBufferDelay = [3, 5].includes(Number(message.delay))
+                ? Number(message.delay)
+                : 5;
+
+            sendTab(
+                {
+                    type: 'BUFFERING_SETTINGS',
+                    delay: state.pauseOnBufferDelay,
+                },
+                state.videoFrameId,
+            );
 
             if (!state.pauseOnBuffer) {
                 state.bufferingMembers = [];
@@ -1455,6 +1491,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             sendRoomEvent('room-settings', {
                 autoPause: state.autoPause,
                 pauseOnBuffer: state.pauseOnBuffer,
+                pauseOnBufferDelay: state.pauseOnBufferDelay,
             });
             return;
         }
@@ -1495,6 +1532,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
+            state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
             state.bufferPause = null;
             state.autoPauseReady = [];
@@ -1555,6 +1593,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
+            state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
             state.bufferPause = null;
             state.autoPauseReady = [];
@@ -1588,6 +1627,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
+            state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
             state.bufferPause = null;
             state.autoPauseReady = [];

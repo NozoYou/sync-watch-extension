@@ -336,6 +336,11 @@ function render(state) {
         getElement('auto-pause-owner').classList.toggle('hidden', isHost);
         getElement('pause-on-buffer').checked = !!state.pauseOnBuffer;
         getElement('pause-on-buffer').disabled = !isHost || !state.connected;
+        getElement('pause-on-buffer-duration').value = String(
+            state.pauseOnBufferDelay || 5,
+        );
+        getElement('pause-on-buffer-duration').disabled =
+            !isHost || !state.connected;
         getElement('pause-on-buffer-owner').classList.toggle('hidden', isHost);
         renderShareHistory(state.navigationHistory || []);
 
@@ -389,6 +394,8 @@ function render(state) {
         getElement('auto-pause-panel').classList.add('hidden');
         getElement('pause-on-buffer').checked = false;
         getElement('pause-on-buffer').disabled = true;
+        getElement('pause-on-buffer-duration').value = '5';
+        getElement('pause-on-buffer-duration').disabled = true;
         getElement('pause-on-buffer-owner').classList.add('hidden');
         getElement('share-history').classList.add('hidden');
     }
@@ -410,6 +417,7 @@ chrome.storage.local.get(
         'navigationHistory',
         'autoPause',
         'pauseOnBuffer',
+        'pauseOnBufferDelay',
         'modifyTabIcon',
         'role',
         'clientId',
@@ -492,6 +500,15 @@ getElement('pause-on-buffer').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_PAUSE_ON_BUFFER',
         enabled: getElement('pause-on-buffer').checked,
+        delay: Number(getElement('pause-on-buffer-duration').value),
+    });
+});
+
+getElement('pause-on-buffer-duration').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_PAUSE_ON_BUFFER',
+        enabled: getElement('pause-on-buffer').checked,
+        delay: Number(getElement('pause-on-buffer-duration').value),
     });
 });
 

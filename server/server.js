@@ -95,6 +95,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.navigationHistory = [];
                 room.autoPause = { enabled: false, duration: 5 };
                 room.pauseOnBuffer = false;
+                room.pauseOnBufferDelay = 5;
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 rooms.set(roomId, room);
@@ -160,6 +161,7 @@ webSocketServer.on('connection', (webSocket) => {
                     navigationHistory: room.navigationHistory,
                     autoPause: room.autoPause,
                     pauseOnBuffer: room.pauseOnBuffer,
+                    pauseOnBufferDelay: room.pauseOnBufferDelay,
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                 }),
@@ -306,9 +308,14 @@ webSocketServer.on('connection', (webSocket) => {
                     room.pauseOnBuffer = message.payload.pauseOnBuffer;
                 }
 
+                if ([3, 5].includes(message.payload.pauseOnBufferDelay)) {
+                    room.pauseOnBufferDelay = message.payload.pauseOnBufferDelay;
+                }
+
                 message.payload = {
                     autoPause: room.autoPause,
                     pauseOnBuffer: room.pauseOnBuffer,
+                    pauseOnBufferDelay: room.pauseOnBufferDelay,
                 };
             }
 
