@@ -1,5 +1,15 @@
 const getElement = (id) => document.getElementById(id);
 const statusElement = getElement('status');
+let renderedHistorySignature = '';
+
+function safeHistoryUrl(value) {
+    try {
+        const url = new URL(value);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+    } catch {
+        return '';
+    }
+}
 
 function getConfig() {
     return {
@@ -70,6 +80,91 @@ function renderHostMemberSettings(state) {
     );
 }
 
+function renderShareHistory(history = []) {
+    const panel = getElement('share-history');
+    const recentList = getElement('recent-share-list');
+    const olderList = getElement('older-share-list');
+    const olderDetails = getElement('older-shares');
+    const newestFirst = [...history].slice(0, 15);
+    const signature = JSON.stringify(newestFirst);
+
+    // Keep expanded older entries open during unrelated popup state updates.
+    if (signature === renderedHistorySignature) return;
+    renderedHistorySignature = signature;
+    const recent = newestFirst.slice(0, 3);
+    const older = newestFirst.slice(3);
+
+    recentList.replaceChildren();
+    olderList.replaceChildren();
+    panel.classList.toggle('hidden', newestFirst.length === 0);
+    olderDetails.classList.toggle('hidden', older.length === 0);
+    getElement('older-shares-summary').textContent = `更早的分享（${older.length}）`;
+
+    function createOpenButton(navigation) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'quiet share-history-open';
+        button.textContent = '↗ 新标签页';
+        button.title = '在新标签页打开此视频';
+        button.addEventListener('click', () => {
+            try {
+                const url = new URL(navigation.url);
+                if (['http:', 'https:'].includes(url.protocol)) {
+                    chrome.tabs.create({ url: url.href });
+                }
+            } catch {
+                // Ignore malformed URLs from stale or invalid room history.
+            }
+        });
+        return button;
+    }
+
+    for (const navigation of recent) {
+        const row = document.createElement('div');
+        row.className = 'share-history-item';
+        const main = document.createElement('div');
+        main.className = 'share-history-item-main';
+
+        const title = document.createElement('strong');
+        title.className = 'share-history-title';
+        title.textContent = navigation.title || navigation.url || '未命名视频';
+
+        const link = document.createElement('a');
+        link.className = 'share-history-url';
+        link.href = safeHistoryUrl(navigation.url) || '#';
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = navigation.url || '';
+
+        main.append(title, link);
+        row.append(main, createOpenButton(navigation));
+        recentList.append(row);
+    }
+
+    for (const navigation of older) {
+        const row = document.createElement('div');
+        row.className = 'share-history-item';
+        const main = document.createElement('div');
+        main.className = 'share-history-item-main';
+        const details = document.createElement('details');
+        const title = document.createElement('summary');
+        title.className = 'share-history-title';
+        title.textContent = navigation.title || '未命名视频';
+
+        const link = document.createElement('a');
+        link.className = 'share-history-url';
+        link.href = safeHistoryUrl(navigation.url) || '#';
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = navigation.url || '';
+
+        details.append(title, link);
+        main.append(details);
+        row.append(main, createOpenButton(navigation));
+        olderList.append(row);
+    }
+}
+
 function saveConfig() {
     const config = getConfig();
 
@@ -102,6 +197,15 @@ function render(state) {
             state.memberSettings?.[state.clientId]?.autoFollow;
         getElement('auto-follow').disabled = !state.connected;
         renderHostMemberSettings(state);
+
+        const autoPause = state.autoPause || { enabled: false, duration: 5 };
+        const isHost = state.role === 'host';
+        getElement('auto-pause').checked = !!autoPause.enabled;
+        getElement('auto-pause').disabled = !isHost || !state.connected;
+        getElement('auto-pause-duration').value = String(autoPause.duration || 5);
+        getElement('auto-pause-duration').disabled = !isHost || !state.connected;
+        getElement('auto-pause-owner').classList.toggle('hidden', isHost);
+        renderShareHistory(state.navigationHistory || []);
 
         const navigation = state.pendingNavigation || state.sharedNavigation;
 
@@ -146,6 +250,8 @@ function render(state) {
         getElement('room-box').classList.add('hidden');
         getElement('auto-follow-control').classList.add('hidden');
         getElement('host-member-settings').classList.add('hidden');
+        getElement('auto-pause-panel').classList.add('hidden');
+        getElement('share-history').classList.add('hidden');
     }
 
     if (state.status) statusElement.textContent = state.status;
@@ -162,6 +268,8 @@ chrome.storage.local.get(
         'roomLimit',
         'members',
         'memberSettings',
+        'navigationHistory',
+        'autoPause',
         'role',
         'clientId',
         'hostClientId',
@@ -204,6 +312,22 @@ getElement('auto-follow').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_AUTO_FOLLOW',
         enabled: getElement('auto-follow').checked,
+    });
+});
+
+getElement('auto-pause').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_PAUSE',
+        enabled: getElement('auto-pause').checked,
+        duration: getElement('auto-pause-duration').value,
+    });
+});
+
+getElement('auto-pause-duration').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_PAUSE',
+        enabled: getElement('auto-pause').checked,
+        duration: getElement('auto-pause-duration').value,
     });
 });
 

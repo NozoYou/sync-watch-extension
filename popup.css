@@ -165,8 +165,36 @@ button:hover {
 
 /* Per-member playback permissions and automatic navigation following. */
 .auto-follow-control,
-.host-member-settings {
+.host-member-settings,
+.auto-pause-panel,
+.share-history {
     margin-top: 10px;
+}
+
+.auto-pause-duration-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 7px 0 0 22px;
+    color: #aab1c2;
+    font-size: 10px;
+}
+
+.auto-pause-duration-row select {
+    min-width: 0;
+    flex: 1;
+    padding: 5px 7px;
+    border: 1px solid #393d53;
+    border-radius: 6px;
+    background: #1b2030;
+    color: #d9dced;
+    font-size: 10px;
+}
+
+.small {
+    margin: 5px 0 0 22px;
+    color: #8c94a9;
+    font-size: 10px;
 }
 
 .setting-checkbox {
@@ -244,6 +272,57 @@ button:hover {
     color: #aab1c2;
     font-size: 10px;
     overflow-wrap: anywhere;
+}
+
+.share-history h2 {
+    margin: 0 0 6px;
+    color: #aab1c2;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.share-history-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 5px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
+.share-history-item-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.share-history-title {
+    color: #dedaff;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+
+.share-history-url {
+    display: block;
+    margin-top: 4px;
+    color: #a9a0ff;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+}
+
+.share-history-open {
+    flex: none;
+    padding: 5px 7px;
+    font-size: 10px;
+}
+
+.older-shares {
+    margin-top: 6px;
+    padding: 7px 8px;
+}
+
+.older-shares summary {
+    font-size: 10px;
 }
 
 .follow-actions {

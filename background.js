@@ -26,6 +26,10 @@ const state = {
     hostClientId: '',
     members: [],
     memberSettings: {},
+    navigationHistory: [],
+    autoPause: { enabled: false, duration: 5 },
+    autoPauseReady: [],
+    autoPauseStartedNavigationId: '',
     currentVideoUrl: '',
     pendingNavigation: null,
     sharedNavigation: null,
@@ -50,6 +54,10 @@ const ready = chrome.storage.local
         'hostClientId',
         'members',
         'memberSettings',
+        'navigationHistory',
+        'autoPause',
+        'autoPauseReady',
+        'autoPauseStartedNavigationId',
         'currentVideoUrl',
         'pendingNavigation',
         'sharedNavigation',
@@ -85,6 +93,10 @@ function persist() {
         hostClientId: state.hostClientId,
         members: state.members,
         memberSettings: state.memberSettings,
+        navigationHistory: state.navigationHistory,
+        autoPause: state.autoPause,
+        autoPauseReady: state.autoPauseReady,
+        autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         currentVideoUrl: state.currentVideoUrl,
         pendingNavigation: state.pendingNavigation,
         sharedNavigation: state.sharedNavigation,
@@ -156,6 +168,88 @@ function sendRoomEvent(event, payload) {
     if (socket?.readyState !== WebSocket.OPEN) return;
 
     socket.send(JSON.stringify({ type: 'room-event', event, payload }));
+}
+
+function addNavigationToHistory(navigation) {
+    if (
+        !navigation?.id ||
+        state.navigationHistory.some((item) => item.id === navigation.id)
+    ) {
+        return;
+    }
+
+    state.navigationHistory = [navigation, ...state.navigationHistory].slice(0, 15);
+}
+
+function mergeNavigationHistory(history = []) {
+    const seen = new Set();
+    state.navigationHistory = [...history, ...state.navigationHistory]
+        .filter((item) => {
+            if (!item?.id || !safePageUrl(item.url) || seen.has(item.id)) {
+                return false;
+            }
+
+            seen.add(item.id);
+            return true;
+        })
+        .slice(0, 15);
+}
+
+function announceNavigationReady() {
+    if (
+        !state.connected ||
+        !state.sharedNavigation?.id ||
+        !state.videoReady ||
+        state.currentVideoUrl !== state.sharedNavigation.url ||
+        state.followingHost !== true
+    ) {
+        return;
+    }
+
+    if (!state.autoPauseReady.includes(state.clientId)) {
+        state.autoPauseReady.push(state.clientId);
+        sendRoomEvent('auto-pause-ready', {
+            navigationId: state.sharedNavigation.id,
+        });
+    }
+
+    if (state.role === 'host') startAutoPauseWhenReady();
+}
+
+function startAutoPauseWhenReady() {
+    if (
+        state.role !== 'host' ||
+        !state.autoPause.enabled ||
+        !state.sharedNavigation?.id ||
+        !state.autoPauseReady.includes(state.clientId) ||
+        state.autoPauseStartedNavigationId === state.sharedNavigation.id
+    ) {
+        return;
+    }
+
+    const followingMembers = state.followResponses
+        .filter((response) => response.status === 'following')
+        .map((response) => response.clientId);
+
+    if (followingMembers.some((clientId) => !state.autoPauseReady.includes(clientId))) {
+        return;
+    }
+
+    // A common resume time keeps every ready player paused for the same interval.
+    const duration = state.autoPause.duration;
+    const resumeAt =
+        duration === 'manual' ? null : Date.now() + Number(duration) * 1000;
+    const payload = {
+        navigationId: state.sharedNavigation.id,
+        pauseId: crypto.randomUUID(),
+        url: state.sharedNavigation.url,
+        resumeAt,
+    };
+
+    state.autoPauseStartedNavigationId = state.sharedNavigation.id;
+    publish();
+    sendTab({ type: 'AUTO_PAUSE', ...payload }, state.videoFrameId);
+    sendRoomEvent('auto-pause-start', payload);
 }
 
 function safePageUrl(value) {
@@ -294,6 +388,37 @@ async function connectRoom() {
                     ? message.clientId
                     : (message.peers || [])[0] || message.clientId);
             mergeRoomMemberSettings(message.memberSettings);
+            const locallySavedHistory = state.navigationHistory;
+            state.navigationHistory = [];
+            mergeNavigationHistory([
+                ...locallySavedHistory,
+                ...(message.navigationHistory || []),
+            ]);
+            state.autoPause = message.autoPause || { enabled: false, duration: 5 };
+            state.autoPauseReady = [];
+
+            if (state.role === 'host') {
+                if (message.sharedNavigation) {
+                    addNavigationToHistory(message.sharedNavigation);
+                }
+
+                // Restore a locally shared page if it was created while the server was offline.
+                if (
+                    state.sharedNavigation &&
+                    state.sharedNavigation.id !== message.sharedNavigation?.id
+                ) {
+                    addNavigationToHistory(state.sharedNavigation);
+                    sendRoomEvent('navigate', state.sharedNavigation);
+                } else if (message.sharedNavigation) {
+                    state.sharedNavigation = message.sharedNavigation;
+                }
+
+                if (state.navigationHistory.length) {
+                    sendRoomEvent('history-sync', {
+                        history: state.navigationHistory,
+                    });
+                }
+            }
 
             if (state.role !== 'host') state.followingHost = true;
 
@@ -305,6 +430,7 @@ async function connectRoom() {
 
             if (state.role !== 'host' && message.sharedNavigation) {
                 state.sharedNavigation = message.sharedNavigation;
+                addNavigationToHistory(message.sharedNavigation);
 
                 if (state.currentVideoUrl === message.sharedNavigation.url) {
                     state.followingHost = true;
@@ -327,6 +453,7 @@ async function connectRoom() {
                 sendRoomEvent('snapshot-request', { navigationId: '' });
             }
 
+            announceNavigationReady();
             publish();
             return;
         }
@@ -362,6 +489,10 @@ async function connectRoom() {
             state.followResponses = state.followResponses.filter(
                 (response) => response.clientId !== message.clientId,
             );
+            state.autoPauseReady = state.autoPauseReady.filter(
+                (clientId) => clientId !== message.clientId,
+            );
+            startAutoPauseWhenReady();
             publish();
             return;
         }
@@ -385,6 +516,50 @@ async function connectRoom() {
 }
 
 function handleRoomEvent(message) {
+    if (message.event === 'history-sync' && message.from === state.hostClientId) {
+        mergeNavigationHistory(message.payload?.history || []);
+        publish();
+        return;
+    }
+
+    if (message.event === 'room-settings' && message.from === state.hostClientId) {
+        state.autoPause = {
+            enabled: !!message.payload?.autoPause?.enabled,
+            duration: message.payload?.autoPause?.duration || 5,
+        };
+        publish();
+        return;
+    }
+
+    if (
+        message.event === 'auto-pause-ready' &&
+        state.role === 'host' &&
+        message.payload?.navigationId === state.sharedNavigation?.id &&
+        state.members.includes(message.from)
+    ) {
+        if (!state.autoPauseReady.includes(message.from)) {
+            state.autoPauseReady.push(message.from);
+        }
+        startAutoPauseWhenReady();
+        publish();
+        return;
+    }
+
+    if (
+        message.event === 'auto-pause-start' &&
+        state.role !== 'host' &&
+        message.payload?.navigationId === state.sharedNavigation?.id &&
+        state.followingHost === true
+    ) {
+        sendTab(
+            { type: 'AUTO_PAUSE', ...message.payload },
+            state.videoFrameId,
+        );
+        state.autoPauseStartedNavigationId = message.payload.navigationId;
+        publish();
+        return;
+    }
+
     if (message.event === 'member-settings') {
         const targetClientId = message.payload?.targetClientId;
         const updates = message.payload?.settings || {};
@@ -429,6 +604,9 @@ function handleRoomEvent(message) {
 
         state.pendingNavigation = message.payload;
         state.sharedNavigation = message.payload;
+        addNavigationToHistory(message.payload);
+        state.autoPauseReady = [];
+        state.autoPauseStartedNavigationId = '';
         state.followResponses = state.members
             .filter((clientId) => clientId !== state.hostClientId)
             .map((clientId) => ({ clientId, status: 'pending' }));
@@ -460,6 +638,15 @@ function handleRoomEvent(message) {
                 clientId: message.from,
                 status: message.payload.status,
             });
+        }
+
+        // If someone opts in after an earlier group pause, include them in a new pause cycle.
+        if (
+            message.payload.status === 'following' &&
+            !state.autoPauseReady.includes(message.from)
+        ) {
+            state.autoPauseStartedNavigationId = '';
+            startAutoPauseWhenReady();
         }
 
         publish();
@@ -568,12 +755,31 @@ function hostPageDetected(tabId, candidate) {
     }
 
     if (pageUrl === state.currentVideoUrl) {
-        if (state.tabId !== tabId) {
+        if (
+            state.tabId !== tabId ||
+            state.videoFrameId !== candidate.frameId ||
+            !state.videoReady
+        ) {
             state.tabId = tabId;
             state.videoFrameId = candidate.frameId;
             state.videoReady = true;
             publish();
         }
+
+        // A room created before the video frame was detected still shares its first page.
+        if (!state.sharedNavigation) {
+            state.sharedNavigation = {
+                id: crypto.randomUUID(),
+                url: pageUrl,
+                title: candidate.title || '当前视频',
+            };
+            addNavigationToHistory(state.sharedNavigation);
+            publish();
+            if (state.connected) {
+                sendRoomEvent('navigate', state.sharedNavigation);
+            }
+        }
+        announceNavigationReady();
         return;
     }
 
@@ -650,6 +856,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                         });
                     }
                 }
+
+                announceNavigationReady();
             }
 
             if (sender.tab.active && candidate.hasVideo) {
@@ -722,6 +930,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 url,
                 title: candidate.title,
             };
+            addNavigationToHistory(state.sharedNavigation);
+            state.autoPauseReady = [state.clientId];
+            state.autoPauseStartedNavigationId = '';
             state.hostCandidate = null;
             state.followResponses = state.members
                 .filter((clientId) => clientId !== state.clientId)
@@ -730,6 +941,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
             publish();
             sendRoomEvent('navigate', state.sharedNavigation);
+            startAutoPauseWhenReady();
             sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
             return;
         }
@@ -806,6 +1018,29 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (
+            message.type === 'SET_AUTO_PAUSE' &&
+            state.role === 'host' &&
+            state.connected
+        ) {
+            const requestedDuration =
+                message.duration === 'manual'
+                    ? 'manual'
+                    : Number(message.duration);
+            const duration = [3, 5, 10].includes(requestedDuration)
+                ? requestedDuration
+                : requestedDuration === 'manual'
+                  ? 'manual'
+                  : 5;
+            state.autoPause = {
+                enabled: !!message.enabled,
+                duration,
+            };
+            publish();
+            sendRoomEvent('room-settings', { autoPause: state.autoPause });
+            return;
+        }
+
         if (message.type === 'SAVE_CONFIG') {
             state.server = message.server;
             state.turnUrls = message.turnUrls || '';
@@ -822,7 +1057,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.tabId = message.tabId;
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
-            state.currentVideoUrl = tab?.url || '';
+            state.currentVideoUrl = safePageUrl(tab?.url) || '';
 
             const frame = selectVideoFrame(state.tabId);
             state.videoReady = !!frame;
@@ -830,10 +1065,26 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.hostClientId = '';
             state.members = [];
             state.memberSettings = {};
+            state.navigationHistory = [];
+            state.autoPause = { enabled: false, duration: 5 };
+            state.autoPauseReady = [];
+            state.autoPauseStartedNavigationId = '';
             state.memberCount = 0;
             state.dataConnections = 0;
             state.pendingNavigation = null;
             state.sharedNavigation = null;
+            const initialVideo = bestVideoFrame(state.tabId);
+            if (initialVideo) {
+                const initialUrl = safePageUrl(initialVideo.pageUrl || tab?.url);
+                if (initialUrl) {
+                    state.sharedNavigation = {
+                        id: crypto.randomUUID(),
+                        url: initialUrl,
+                        title: initialVideo.title || tab?.title || '当前视频',
+                    };
+                    addNavigationToHistory(state.sharedNavigation);
+                }
+            }
             state.followResponses = [];
             state.followingHost = true;
             state.status = '正在创建房间…';
@@ -862,6 +1113,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberCount = 0;
             state.members = [];
             state.memberSettings = {};
+            state.navigationHistory = [];
+            state.autoPause = { enabled: false, duration: 5 };
+            state.autoPauseReady = [];
+            state.autoPauseStartedNavigationId = '';
             state.dataConnections = 0;
             state.pendingNavigation = null;
             state.sharedNavigation = null;
@@ -890,6 +1145,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.dataConnections = 0;
             state.members = [];
             state.memberSettings = {};
+            state.navigationHistory = [];
+            state.autoPause = { enabled: false, duration: 5 };
+            state.autoPauseReady = [];
+            state.autoPauseStartedNavigationId = '';
             state.pendingNavigation = null;
             state.sharedNavigation = null;
             state.followResponses = [];

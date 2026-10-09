@@ -69,6 +69,29 @@
                 </label>
             </div>
 
+            <section id="auto-pause-panel" class="auto-pause-panel">
+                <label class="setting-checkbox" for="auto-pause">
+                    <input id="auto-pause" type="checkbox" />
+                    新视频就绪后自动暂停
+                </label>
+                <label
+                    id="auto-pause-duration-row"
+                    class="auto-pause-duration-row"
+                    for="auto-pause-duration"
+                >
+                    暂停时长
+                    <select id="auto-pause-duration">
+                        <option value="3">3 秒</option>
+                        <option value="5">5 秒</option>
+                        <option value="10">10 秒</option>
+                        <option value="manual">直到点击播放</option>
+                    </select>
+                </label>
+                <p id="auto-pause-owner" class="small hidden">
+                    自动暂停设置由房主管理。
+                </p>
+            </section>
+
             <section id="host-member-settings" class="host-member-settings hidden">
                 <h2>成员权限</h2>
                 <div id="member-settings-list"></div>
@@ -83,6 +106,15 @@
                     <button id="follow-no" class="quiet">不跟随</button>
                 </div>
             </div>
+
+            <section id="share-history" class="share-history hidden">
+                <h2>分享记录</h2>
+                <div id="recent-share-list"></div>
+                <details id="older-shares" class="older-shares hidden">
+                    <summary id="older-shares-summary">更早的分享</summary>
+                    <div id="older-share-list"></div>
+                </details>
+            </section>
 
             <details id="connection-details">
                 <summary>连接详情</summary>

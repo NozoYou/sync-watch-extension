@@ -92,6 +92,8 @@ webSocketServer.on('connection', (webSocket) => {
             if (!room) {
                 room = new Map();
                 room.sharedNavigation = null;
+                room.navigationHistory = [];
+                room.autoPause = { enabled: false, duration: 5 };
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 rooms.set(roomId, room);
@@ -154,6 +156,8 @@ webSocketServer.on('connection', (webSocket) => {
                     peers: existingMembers,
                     limit: roomLimit,
                     sharedNavigation: room.sharedNavigation,
+                    navigationHistory: room.navigationHistory,
+                    autoPause: room.autoPause,
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                 }),
@@ -201,6 +205,10 @@ webSocketServer.on('connection', (webSocket) => {
                 'snapshot-request',
                 'snapshot',
                 'member-settings',
+                'room-settings',
+                'auto-pause-ready',
+                'auto-pause-start',
+                'history-sync',
             ]);
 
             if (
@@ -221,6 +229,67 @@ webSocketServer.on('connection', (webSocket) => {
             }
 
             const room = rooms.get(webSocket.room);
+
+            if (message.event === 'room-settings') {
+                if (webSocket.clientId !== room.hostClientId) return;
+
+                const requested = message.payload.autoPause || {};
+                const duration = [3, 5, 10, 'manual'].includes(requested.duration)
+                    ? requested.duration
+                    : 5;
+                room.autoPause = {
+                    enabled: requested.enabled === true,
+                    duration,
+                };
+                message.payload = { autoPause: room.autoPause };
+            }
+
+            if (message.event === 'history-sync') {
+                if (webSocket.clientId !== room.hostClientId) return;
+
+                const history = Array.isArray(message.payload.history)
+                    ? message.payload.history
+                    : [];
+                const sanitizedHistory = history
+                    .filter((item) => {
+                        try {
+                            const url = new URL(item.url);
+                            return (
+                                item.id &&
+                                ['http:', 'https:'].includes(url.protocol)
+                            );
+                        } catch {
+                            return false;
+                        }
+                    })
+                    .slice(0, 15);
+                const knownIds = new Set(sanitizedHistory.map((item) => item.id));
+                room.navigationHistory = [
+                    ...sanitizedHistory,
+                    ...room.navigationHistory.filter(
+                        (item) => !knownIds.has(item.id),
+                    ),
+                ].slice(0, 15);
+                message.payload = { history: room.navigationHistory };
+            }
+
+            if (
+                message.event === 'auto-pause-start' &&
+                (webSocket.clientId !== room.hostClientId ||
+                    message.payload.navigationId !== room.sharedNavigation?.id ||
+                    typeof message.payload.pauseId !== 'string' ||
+                    (message.payload.resumeAt !== null &&
+                        !Number.isFinite(message.payload.resumeAt)))
+            ) {
+                return;
+            }
+
+            if (
+                message.event === 'auto-pause-ready' &&
+                message.payload.navigationId !== room.sharedNavigation?.id
+            ) {
+                return;
+            }
 
             if (
                 (message.event === 'video' || message.event === 'snapshot') &&
@@ -278,7 +347,14 @@ webSocketServer.on('connection', (webSocket) => {
             }
 
             if (message.event === 'navigate') {
+                if (webSocket.clientId !== room.hostClientId) return;
                 room.sharedNavigation = message.payload;
+                room.navigationHistory = [
+                    message.payload,
+                    ...room.navigationHistory.filter(
+                        (item) => item.id !== message.payload.id,
+                    ),
+                ].slice(0, 15);
             }
 
             const roomEvent = JSON.stringify({

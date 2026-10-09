@@ -10,6 +10,8 @@
     let lastTimeSent = 0;
     let lastFrameReport = '';
     let role = '';
+    let autoPauseTimer = null;
+    let lastAutoPauseId = '';
 
     function chooseVideo() {
         const videos = [...document.querySelectorAll('video')];
@@ -170,6 +172,34 @@
         }
     }
 
+    function applyAutomaticPause(message) {
+        const currentVideo = chooseVideo();
+        if (!currentVideo || !message.navigationId) return;
+
+        // Ignore duplicate relays and replace an older pending resume timer.
+        if (!message.pauseId || lastAutoPauseId === message.pauseId) return;
+        lastAutoPauseId = message.pauseId;
+        clearTimeout(autoPauseTimer);
+
+        bind(currentVideo);
+        expectMediaEvent(currentVideo, 'paused', true);
+        currentVideo.pause();
+
+        if (typeof message.resumeAt !== 'number') return;
+
+        autoPauseTimer = setTimeout(() => {
+            if (
+                !currentVideo.paused ||
+                (message.url && location.href !== message.url)
+            ) {
+                return;
+            }
+
+            expectMediaEvent(currentVideo, 'paused', false);
+            currentVideo.play().catch(() => {});
+        }, Math.max(0, message.resumeAt - Date.now()));
+    }
+
     function showPrompt(kind, data) {
         if (!isTop) return;
 
@@ -234,6 +264,8 @@
     chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'APPLY_REMOTE_VIDEO') {
             applyVideo(message.videoState);
+        } else if (message.type === 'AUTO_PAUSE') {
+            applyAutomaticPause(message);
         } else if (message.type === 'SHOW_HOST_PROMPT') {
             showPrompt('host', message);
         } else if (message.type === 'HIDE_ROOM_PROMPT') {
