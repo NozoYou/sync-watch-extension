@@ -32,6 +32,7 @@ const state = {
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
     currentVideoUrl: '',
+    currentPlayback: null,
     pendingNavigation: null,
     sharedNavigation: null,
     followResponses: [],
@@ -61,6 +62,7 @@ const ready = chrome.storage.local
         'autoPauseReady',
         'autoPauseStartedNavigationId',
         'currentVideoUrl',
+        'currentPlayback',
         'pendingNavigation',
         'sharedNavigation',
         'followResponses',
@@ -102,6 +104,7 @@ function persist() {
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         currentVideoUrl: state.currentVideoUrl,
+        currentPlayback: state.currentPlayback,
         pendingNavigation: state.pendingNavigation,
         sharedNavigation: state.sharedNavigation,
         followResponses: state.followResponses,
@@ -637,6 +640,7 @@ function handleRoomEvent(message) {
 
         state.pendingNavigation = message.payload;
         state.sharedNavigation = message.payload;
+        state.currentPlayback = null;
         addNavigationToHistory(message.payload);
         state.autoPauseReady = [];
         state.autoPauseStartedNavigationId = '';
@@ -714,6 +718,16 @@ function handleRoomEvent(message) {
                 return;
             }
         }
+
+        // Reflect the latest accepted room action in every member's popup.
+        state.currentPlayback = {
+            ...message.payload,
+            title:
+                message.payload.title ||
+                state.sharedNavigation?.title ||
+                '当前视频',
+        };
+        publish();
 
         if (state.videoReady && state.tabId !== null) {
             sendTab(
@@ -955,6 +969,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 message.snapshot ? 'snapshot' : 'video',
                 message.videoState,
             );
+
+            if (state.role === 'host') {
+                state.currentPlayback = {
+                    ...message.videoState,
+                    title:
+                        message.videoState.title ||
+                        state.sharedNavigation?.title ||
+                        '当前视频',
+                };
+                publish();
+            }
             return;
         }
 
@@ -973,6 +998,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.videoFrameId = selected?.frameId ?? candidate.frameId;
             state.videoReady = true;
             state.currentVideoUrl = url;
+            state.currentPlayback = null;
             state.sharedNavigation = {
                 id: crypto.randomUUID(),
                 url,
@@ -1115,6 +1141,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
+            state.currentPlayback = null;
 
             const frame = selectVideoFrame(state.tabId);
             state.videoReady = !!frame;
@@ -1169,6 +1196,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = tab?.url || '';
+            state.currentPlayback = null;
 
             const frame = selectVideoFrame(state.tabId);
             state.videoReady = !!frame;
@@ -1184,6 +1212,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.dataConnections = 0;
             state.pendingNavigation = null;
             state.sharedNavigation = null;
+            state.currentPlayback = null;
             state.followResponses = [];
             state.followingHost = true;
 

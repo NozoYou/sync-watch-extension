@@ -1,6 +1,47 @@
 const getElement = (id) => document.getElementById(id);
 const statusElement = getElement('status');
 let renderedHistorySignature = '';
+let currentPlayback = null;
+
+function formatPlaybackTime(seconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(safeSeconds / 60);
+    const remainder = String(safeSeconds % 60).padStart(2, '0');
+
+    return `${minutes}:${remainder}`;
+}
+
+function renderPlaybackProgress() {
+    const panel = getElement('room-playback');
+
+    if (!currentPlayback) {
+        panel.classList.add('hidden');
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    getElement('room-playback-title').textContent =
+        currentPlayback.title || '当前视频';
+    getElement('room-playback-status').textContent = currentPlayback.paused
+        ? '已暂停'
+        : '播放中';
+
+    const elapsed = currentPlayback.paused
+        ? currentPlayback.time
+        : currentPlayback.time +
+          Math.max(0, (Date.now() - currentPlayback.at) / 1000) *
+              (currentPlayback.rate || 1);
+    const duration = Number(currentPlayback.duration) || 0;
+
+    getElement('room-playback-current').textContent =
+        formatPlaybackTime(elapsed);
+    getElement('room-playback-duration').textContent = duration
+        ? formatPlaybackTime(duration)
+        : '时长未知';
+    getElement('room-playback-progress').value = duration
+        ? Math.min(100, (elapsed / duration) * 100)
+        : 0;
+}
 
 function safeHistoryUrl(value) {
     try {
@@ -174,6 +215,9 @@ function saveConfig() {
 }
 
 function render(state) {
+    currentPlayback = state.currentPlayback || null;
+    renderPlaybackProgress();
+
     if (state.server) {
         getElement('server').value = state.server;
         getElement('settings-summary').textContent = '连接设置（已配置）';
@@ -250,6 +294,7 @@ function render(state) {
         }
     } else {
         getElement('room-box').classList.add('hidden');
+        getElement('room-playback').classList.add('hidden');
         getElement('auto-follow-control').classList.add('hidden');
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = true;
@@ -281,6 +326,7 @@ chrome.storage.local.get(
         'pendingNavigation',
         'sharedNavigation',
         'followResponses',
+        'currentPlayback',
     ],
     render,
 );
@@ -288,6 +334,9 @@ chrome.storage.local.get(
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'STATE') render(message.state);
 });
+
+// Advance the displayed clock while the popup is open between room updates.
+setInterval(renderPlaybackProgress, 1000);
 
 getElement('server').addEventListener('change', () => {
     saveConfig();

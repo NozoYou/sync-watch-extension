@@ -38,10 +38,17 @@
         return {
             action,
             time: Number(currentVideo.currentTime) || 0,
+            duration: Number.isFinite(currentVideo.duration)
+                ? currentVideo.duration
+                : 0,
             paused: currentVideo.paused,
             rate: currentVideo.playbackRate,
             at: Date.now(),
             url: location.href,
+            title: (document.title || location.hostname).replace(
+                /^\[一起看\]\s*/,
+                '',
+            ),
         };
     }
 

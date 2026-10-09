@@ -62,6 +62,23 @@
                 <span id="room-members">房间人数：—</span>
             </div>
 
+            <!-- Shows the host's current shared title and playback position. -->
+            <section id="room-playback" class="room-playback hidden">
+                <div class="room-playback-heading">
+                    <strong id="room-playback-title">等待视频状态…</strong>
+                    <span id="room-playback-status">—</span>
+                </div>
+                <progress
+                    id="room-playback-progress"
+                    max="100"
+                    value="0"
+                ></progress>
+                <div class="room-playback-time">
+                    <span id="room-playback-current">0:00</span>
+                    <span id="room-playback-duration">—</span>
+                </div>
+            </section>
+
             <div id="auto-follow-control" class="auto-follow-control hidden">
                 <label class="setting-checkbox" for="auto-follow">
                     <input id="auto-follow" type="checkbox" />
