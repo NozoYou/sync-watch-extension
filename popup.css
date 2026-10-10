@@ -178,36 +178,26 @@ header {
     flex: 1;
 }
 
-#ui-style {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #343c50;
-    border-radius: 8px;
-    background: #1b2131;
-    color: #f5f6fa;
-    font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-/* Style 2 uses the local-time greeting as the only heading. */
-body.style-2 .brand,
-body.style-2 .brand-copy h1 {
+/* The single remaining style uses the local-time greeting as its heading. */
+body.style-1 .brand,
+body.style-1 .brand-copy h1 {
     display: none;
 }
 
-body.style-2 .brand-subtitle-row {
+body.style-1 .brand-subtitle-row {
     min-height: 40px;
     margin-top: 0;
 }
 
-body.style-2 .brand-subtitle-row p,
-body.style-2 .name-separator,
-body.style-2 .display-name-trigger strong {
+body.style-1 .brand-subtitle-row p,
+body.style-1 .name-separator,
+body.style-1 .display-name-trigger strong {
     color: #c9cddd;
     font-size: 18px;
     font-weight: 600;
 }
 
-body.style-2 .display-name-trigger strong {
+body.style-1 .display-name-trigger strong {
     max-width: 116px;
     color: #f5f6fa;
 }

@@ -1,7 +1,16 @@
 (() => {
     // Cleanly replace old listeners when the host requests a reinjection.
     if (window.__syncWatchLoaded) {
-        window.__syncWatchCleanup?.();
+        try {
+            window.__syncWatchCleanup?.();
+        } catch {
+            // An extension reload can invalidate the old script's chrome.runtime
+            // before its cleanup callback runs. Do not let that stale context
+            // prevent the newly injected script from starting.
+            window.__syncWatchLoaded = false;
+            delete window.__syncWatchCleanup;
+        }
+
         if (window.__syncWatchLoaded) return;
     }
     window.__syncWatchLoaded = true;
@@ -763,11 +772,22 @@
 
     // Make repeated executeScript calls safe and prevent duplicate event handlers.
     window.__syncWatchCleanup = () => {
-        if (bufferingReported) {
-            reportBufferingStatus(false, bufferingVideo);
+        try {
+            if (bufferingReported) {
+                reportBufferingStatus(false, bufferingVideo);
+            }
+        } catch {
+            // Best effort only: a previous extension context may be invalid.
         }
+
+        // Clear local listeners and timers even if Chrome has already invalidated
+        // this extension context (for example, after reloading the extension).
         pageEventController.abort();
-        chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+        try {
+            chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+        } catch {
+            // The listener is already gone when the old extension context ends.
+        }
         pageObserver?.disconnect();
         tabMarkerObserver?.disconnect();
         clearInterval(reportInterval);

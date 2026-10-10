@@ -596,12 +596,13 @@ async function handleReinjectionRequest(clientId) {
     try {
         await reinjectRoomTab();
     } catch (error) {
+        const refreshError = String(error?.message || error).slice(0, 160);
         state.memberInjectionStatus[clientId] = {
             refreshing: false,
-            refreshError: String(error?.message || error).slice(0, 160),
+            refreshError,
             receivedAt: Date.now(),
         };
-        state.status = '重新注入失败；请检查页面是否允许扩展访问。';
+        state.status = `重新注入失败：${refreshError}`;
         publish();
     }
 }
@@ -1586,7 +1587,7 @@ async function shareCurrentPage(tabId) {
     if (!url) {
         state.status = '当前标签页无法分享，请切换到普通网页后重试。';
         publish();
-        return;
+        return false;
     }
 
     const candidate = {
@@ -1599,7 +1600,10 @@ async function shareCurrentPage(tabId) {
     if (!shareHostPage(candidate)) {
         state.status = '当前标签页暂时无法分享，请稍后重试。';
         publish();
+        return false;
     }
+
+    return true;
 }
 
 function hostPageDetected(tabId, candidate) {
@@ -1748,6 +1752,21 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
         if (message.type === 'REFRESH_MY_INJECTION') {
             if (state.room && state.clientId) {
+                const activeTabId = Number(message.tabId);
+
+                // With auto-share off, a host can still intentionally switch
+                // the room to the active video page by pressing Refresh.
+                // Rebinding the room first prevents reinjection from targeting
+                // the previous tab stored in state.tabId.
+                if (
+                    state.role === 'host' &&
+                    Number.isInteger(activeTabId) &&
+                    activeTabId !== state.tabId
+                ) {
+                    const pageShared = await shareCurrentPage(activeTabId);
+                    if (!pageShared) return;
+                }
+
                 await handleReinjectionRequest(state.clientId);
             }
             return;

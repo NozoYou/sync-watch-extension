@@ -8,13 +8,6 @@ let selectedPermissionTemplate = '';
 let displayNameEdited = false;
 let pendingDisplayNameSave = null;
 let displayNameComposing = false;
-let selectedUiStyle = '1';
-
-function applyUiStyle(style) {
-    selectedUiStyle = style === '2' ? '2' : '1';
-    document.body.classList.toggle('style-2', selectedUiStyle === '2');
-    getElement('ui-style').value = selectedUiStyle;
-}
 
 function updateLocalGreeting() {
     const hour = new Date().getHours();
@@ -369,9 +362,11 @@ function renderInjectionDebug(state) {
         const frameDescription = report?.frameCount
             ? ` · ${report.frameCount} 个 frame`
             : '';
-        detail.textContent = report
-            ? `${pageDescription}${siteDescription}${frameDescription}`
-            : '等待该成员扩展发送状态';
+        detail.textContent = report?.refreshError
+            ? `刷新错误：${report.refreshError}`
+            : report
+              ? `${pageDescription}${siteDescription}${frameDescription}`
+              : '等待该成员扩展发送状态';
 
         const actions = document.createElement('div');
         actions.className = 'injection-debug-actions';
@@ -813,10 +808,6 @@ chrome.storage.local.get(
     render,
 );
 
-chrome.storage.local.get('uiStyle', ({ uiStyle }) => {
-    applyUiStyle(uiStyle);
-});
-
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'STATE') render(message.state);
 });
@@ -962,19 +953,18 @@ getElement('leave').onclick = () => {
     chrome.runtime.sendMessage({ type: 'LEAVE' });
 };
 
-getElement('refresh-my-injection').addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'REFRESH_MY_INJECTION' });
+getElement('refresh-my-injection').addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    chrome.runtime.sendMessage({
+        type: 'REFRESH_MY_INJECTION',
+        tabId: tab?.id,
+    });
 });
 
 const menuToggle = getElement('menu-toggle');
 const mainMenuPanel = getElement('main-menu-panel');
 const savedProgressToggle = getElement('saved-progress-toggle');
 const savedProgressPanel = getElement('saved-progress-panel');
-
-getElement('ui-style').addEventListener('change', (event) => {
-    applyUiStyle(event.target.value);
-    chrome.storage.local.set({ uiStyle: selectedUiStyle });
-});
 
 function setMenuOpen(isOpen) {
     mainMenuPanel.classList.toggle('hidden', !isOpen);
