@@ -28,6 +28,7 @@ const state = {
     connected: false,
     memberCount: 0,
     roomLimit: 4,
+    autoShare: false,
     dataConnections: 0,
     tabId: null,
     videoFrameId: 0,
@@ -76,6 +77,7 @@ const ready = chrome.storage.local
         'videoFrameId',
         'videoReady',
         'roomLimit',
+        'autoShare',
         'clientId',
         'hostClientId',
         'displayName',
@@ -127,6 +129,7 @@ function persist() {
         connected: state.connected,
         memberCount: state.memberCount,
         roomLimit: state.roomLimit,
+        autoShare: state.autoShare,
         dataConnections: state.dataConnections,
         tabId: state.tabId,
         videoFrameId: state.videoFrameId,
@@ -1531,6 +1534,74 @@ async function chooseNavigation(shouldFollow, navigation) {
     });
 }
 
+function shareHostPage(candidate, { requireVideo = false } = {}) {
+    if (state.role !== 'host' || !state.room || !candidate) return false;
+
+    const selected = bestVideoFrame(candidate.tabId);
+    if (requireVideo && !selected?.hasVideo) return false;
+    const url = safePageUrl(candidate.url);
+    if (!url) return false;
+
+    // End any buffering pause against the old video before switching IDs.
+    finishBufferingPause();
+    state.bufferingMembers = [];
+
+    switchRoomTab(candidate.tabId);
+    state.videoFrameId = selected?.frameId ?? candidate.frameId ?? 0;
+    state.videoReady = !!selected?.hasVideo;
+    sendRoomTabState(state.videoFrameId);
+    sendTab({ type: 'HIDE_ROOM_PROMPT' }, 0, candidate.tabId);
+    state.currentVideoUrl = url;
+    state.currentPlayback = null;
+    state.sharedNavigation = {
+        id: crypto.randomUUID(),
+        url,
+        title: candidate.title || selected?.title || '当前页面',
+    };
+    addNavigationToHistory(state.sharedNavigation);
+    state.autoPauseReady = [state.clientId];
+    state.autoPauseStartedNavigationId = '';
+    state.hostCandidate = null;
+    state.followResponses = state.members
+        .filter((clientId) => clientId !== state.clientId)
+        .map((clientId) => ({ clientId, status: 'pending' }));
+    state.status = '已分享新视频，等待成员选择是否跟随。';
+
+    publish();
+    sendRoomEvent('navigate', state.sharedNavigation);
+    startAutoPauseWhenReady();
+    if (selected?.hasVideo) {
+        sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
+    }
+    return true;
+}
+
+/** Share a selected browser tab through the host's manual share action. */
+async function shareCurrentPage(tabId) {
+    if (state.role !== 'host' || !Number.isInteger(tabId)) return;
+
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const frame = bestVideoFrame(tabId);
+    const url = safePageUrl(frame?.pageUrl || tab?.url);
+    if (!url) {
+        state.status = '当前标签页无法分享，请切换到普通网页后重试。';
+        publish();
+        return;
+    }
+
+    const candidate = {
+        tabId,
+        frameId: frame?.frameId ?? 0,
+        url,
+        title: frame?.title || tab?.title || '当前页面',
+    };
+    state.hostCandidate = candidate;
+    if (!shareHostPage(candidate)) {
+        state.status = '当前标签页暂时无法分享，请稍后重试。';
+        publish();
+    }
+}
+
 function hostPageDetected(tabId, candidate) {
     if (state.role !== 'host' || !state.room || !candidate?.hasVideo) return;
 
@@ -1610,7 +1681,15 @@ function hostPageDetected(tabId, candidate) {
         title: candidate.title || '新视频',
     };
 
+    if (state.autoShare) {
+        shareHostPage(state.hostCandidate, { requireVideo: true });
+        return;
+    }
+
     publish();
+    // 暂时关闭“发现新视频时询问是否分享”的弹窗。
+    // 保留这段调用，之后需要恢复提示时可以取消注释。
+    /*
     sendTab(
         {
             type: 'SHOW_HOST_PROMPT',
@@ -1620,6 +1699,7 @@ function hostPageDetected(tabId, candidate) {
         0,
         tabId,
     );
+    */
 }
 
 async function inspectActiveTab(tabId) {
@@ -1937,39 +2017,26 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.hostCandidate &&
             sender.tab?.id === state.hostCandidate.tabId
         ) {
-            const candidate = state.hostCandidate;
-            const selected = bestVideoFrame(candidate.tabId);
-            const url = safePageUrl(candidate.url);
-            if (!url) return;
+            shareHostPage(state.hostCandidate);
+            return;
+        }
 
-            // End any buffering pause against the old video before switching IDs.
-            finishBufferingPause();
-            state.bufferingMembers = [];
+        if (message.type === 'SHARE_CURRENT_PAGE' && state.role === 'host') {
+            const tabId = Number(message.tabId);
+            if (!Number.isInteger(tabId)) return;
+            await shareCurrentPage(tabId);
+            return;
+        }
 
-            switchRoomTab(candidate.tabId);
-            state.videoFrameId = selected?.frameId ?? candidate.frameId;
-            state.videoReady = true;
-            sendRoomTabState(state.videoFrameId);
-            state.currentVideoUrl = url;
-            state.currentPlayback = null;
-            state.sharedNavigation = {
-                id: crypto.randomUUID(),
-                url,
-                title: candidate.title,
-            };
-            addNavigationToHistory(state.sharedNavigation);
-            state.autoPauseReady = [state.clientId];
-            state.autoPauseStartedNavigationId = '';
-            state.hostCandidate = null;
-            state.followResponses = state.members
-                .filter((clientId) => clientId !== state.clientId)
-                .map((clientId) => ({ clientId, status: 'pending' }));
-            state.status = '已分享新视频，等待成员选择是否跟随。';
-
+        if (message.type === 'SET_AUTO_SHARE' && state.role === 'host') {
+            state.autoShare = !!message.enabled;
             publish();
-            sendRoomEvent('navigate', state.sharedNavigation);
-            startAutoPauseWhenReady();
-            sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
+
+            // If a new video is already awaiting confirmation, enabling
+            // automatic sharing applies to that pending page too.
+            if (state.autoShare && state.hostCandidate) {
+                shareHostPage(state.hostCandidate, { requireVideo: true });
+            }
             return;
         }
 
@@ -2315,6 +2382,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.server = message.server || state.server;
             state.room = Math.random().toString(36).slice(2, 8).toUpperCase();
             state.role = 'host';
+            state.autoShare = false;
             const requestedRoomLimit = Number(message.roomLimit);
             state.roomLimit = Number.isInteger(requestedRoomLimit)
                 ? Math.max(4, Math.min(16, requestedRoomLimit))
@@ -2385,6 +2453,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.server = message.server || state.server;
             state.room = roomCode;
             state.role = 'guest';
+            state.autoShare = false;
             switchRoomTab(message.tabId);
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
@@ -2431,6 +2500,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             sendTab({ type: 'ROOM_STOP' });
             state.room = '';
             state.role = '';
+            state.autoShare = false;
             state.clientId = '';
             state.hostClientId = '';
             state.connected = false;
@@ -2531,5 +2601,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         }
 
         publishInjectionStatus();
+    }
+});
+
+// Share the active browser tab without opening the extension popup.
+chrome.commands.onCommand.addListener(async (command) => {
+    if (command !== 'share-current-page') return;
+
+    await ready;
+    const [activeTab] = await chrome.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+    });
+    if (activeTab?.id !== undefined) {
+        await shareCurrentPage(activeTab.id);
     }
 });

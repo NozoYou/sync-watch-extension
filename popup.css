@@ -15,6 +15,7 @@ body {
 
 .header-actions {
     display: flex;
+    flex: none;
     align-items: center;
     gap: 7px;
     margin-left: auto;
@@ -51,16 +52,117 @@ header {
     box-shadow: 0 12px 30px #0009;
 }
 
+.saved-progress-panel {
+    position: absolute;
+    z-index: 21;
+    top: 64px;
+    right: 10px;
+    width: 370px;
+    max-height: calc(100vh - 76px);
+    overflow-y: auto;
+    margin: 0;
+    border: 1px solid #3b4058;
+    background: #151a27;
+    box-shadow: 0 12px 30px #0009;
+}
+
 .main-menu-panel > details {
     margin: 5px 0;
 }
 
 .display-name-panel {
-    margin: 8px 0;
-    padding: 8px 9px;
-    border: 1px solid #2b3245;
-    border-radius: 8px;
+    position: relative;
+    flex: none;
+    margin: 0;
+}
+
+.brand-copy {
+    min-width: 0;
+    flex: 1;
+}
+
+.brand-subtitle-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    min-width: 0;
+    min-height: 40px;
+    white-space: nowrap;
+}
+
+.brand-subtitle-row p {
+    flex: none;
+    margin: 0;
+    color: #929ab0;
+    font-size: 15px;
+    line-height: 1.2;
+}
+
+.name-separator {
+    margin-right: -3px;
+    color: #5d6579;
+    font-size: 15px;
+    line-height: 1.2;
+}
+
+.display-name-trigger {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    color: #aab1c2;
+    text-align: left;
+}
+
+.display-name-trigger strong {
+    max-width: 116px;
+    overflow: hidden;
+    color: #eef1f8;
+    font-size: 15px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+}
+
+.display-name-edit-icon {
+    position: relative;
+    top: 5px;
+    left: 1px;
+    color: #929ab0;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.name-confirm-button {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 5px;
+    background: #7766f5;
+    color: white;
+    font-size: 14px;
+}
+
+.display-name-row {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 7px);
+    left: 0;
+    width: 190px;
+    max-width: calc(100vw - 36px);
+    padding: 6px;
+    border: 1px solid #3b4058;
+    border-radius: 9px;
     background: #191e2c;
+    box-shadow: 0 8px 22px #0009;
+}
+
+.display-name-row input {
+    padding: 6px 7px;
+    font-size: 11px;
 }
 
 .display-name-row,
@@ -92,7 +194,9 @@ header {
 
 h1 {
     margin: 0;
+    color: #c9cddd;
     font-size: 17px;
+    font-weight: 600;
 }
 
 header p {
@@ -313,6 +417,7 @@ button:hover {
 /* Per-member playback permissions and automatic navigation following. */
 .tab-marker-control,
 .host-member-settings,
+.host-sharing-settings,
 .self-injection-control,
 .injection-debug,
 .auto-pause-panel,
@@ -341,6 +446,20 @@ button:hover {
 
 .feature-menu-content {
     padding-top: 5px;
+}
+
+.host-sharing-settings {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: #22243a;
+}
+
+.host-sharing-settings .setting-checkbox {
+    margin: 0;
 }
 
 .saved-progress-content {
@@ -426,6 +545,28 @@ button:hover {
 
 .injection-debug .small {
     margin-left: 0;
+}
+
+.injection-debug .buffering-pause-panel {
+    padding: 8px;
+    border: 1px solid #3b4058;
+    border-radius: 8px;
+    background: #191e2c;
+}
+
+.buffering-pause-panel > strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #dedaff;
+    font-size: 11px;
+}
+
+.buffering-pause-panel .setting-checkbox {
+    margin: 0;
+}
+
+.buffering-pause-panel .small {
+    margin: 5px 0 0;
 }
 
 .injection-debug-row {

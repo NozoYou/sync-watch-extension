@@ -9,9 +9,41 @@
     <body>
         <header>
             <div class="brand">▶</div>
-            <div>
+            <div class="brand-copy">
                 <h1>一起看</h1>
-                <p>小房间网页视频同步</p>
+                <div class="brand-subtitle-row">
+                    <p id="local-greeting">你好</p>
+                    <span class="name-separator" aria-hidden="true">，</span>
+                    <section class="display-name-panel">
+                        <button
+                            id="display-name-trigger"
+                            class="display-name-trigger"
+                            type="button"
+                            aria-label="点击修改房间显示名称"
+                            title="点击修改名称"
+                        >
+                            <strong id="display-name-label">成员</strong>
+                            <span class="display-name-edit-icon" aria-hidden="true">✎</span>
+                        </button>
+                        <div id="display-name-editor" class="display-name-row hidden">
+                            <input
+                                id="display-name"
+                                maxlength="24"
+                                placeholder="输入大家看到的名字"
+                                autocomplete="nickname"
+                            />
+                            <button
+                                id="save-display-name"
+                                class="name-confirm-button"
+                                type="button"
+                                aria-label="确认名称"
+                                title="确认名称"
+                            >
+                                ✓
+                            </button>
+                        </div>
+                    </section>
+                </div>
             </div>
             <div class="header-actions">
                 <button
@@ -33,6 +65,16 @@
                     ↗
                 </button>
                 <button
+                    id="saved-progress-toggle"
+                    class="icon-button saved-progress-toggle"
+                    type="button"
+                    aria-label="本地保存的进度"
+                    aria-expanded="false"
+                    title="本地保存的进度"
+                >
+                    ▣
+                </button>
+                <button
                     id="menu-toggle"
                     class="icon-button menu-toggle"
                     type="button"
@@ -45,36 +87,20 @@
             </div>
         </header>
 
-        <section class="display-name-panel">
-            <label for="display-name">房间显示名称</label>
-            <div class="display-name-row">
-                <input
-                    id="display-name"
-                    maxlength="24"
-                    placeholder="输入大家看到的名字"
-                    autocomplete="nickname"
-                />
-                <button id="save-display-name" class="quiet" type="button">
-                    保存
+        <details id="saved-progress-panel" class="saved-progress-panel hidden">
+            <summary id="saved-progress-summary">本地保存的进度</summary>
+            <div class="saved-progress-content">
+                <button id="save-current-progress" class="quiet" type="button">
+                    保存当前进度
                 </button>
+                <p id="saved-progress-empty" class="small hidden">
+                    保存的进度只保存在本机扩展中。
+                </p>
+                <div id="saved-progress-list"></div>
             </div>
-            <p class="small">保存后会同步给房间内所有人。</p>
-        </section>
+        </details>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
-            <details id="saved-progress-panel" class="feature-menu saved-progress-panel">
-                <summary id="saved-progress-summary">本地保存的进度</summary>
-                <div class="saved-progress-content">
-                    <button id="save-current-progress" class="quiet" type="button">
-                        保存当前进度
-                    </button>
-                    <p id="saved-progress-empty" class="small hidden">
-                        保存的进度只保存在本机扩展中。
-                    </p>
-                    <div id="saved-progress-list"></div>
-                </div>
-            </details>
-
             <!-- Server settings stay collapsed after a server address is saved. -->
             <details id="connection-settings">
                 <summary id="settings-summary">连接设置</summary>
@@ -128,6 +154,7 @@
                         </p>
                     </section>
 
+                    <!--
                     <section class="buffering-pause-panel">
                         <label class="setting-checkbox" for="pause-on-buffer">
                             <input id="pause-on-buffer" type="checkbox" />
@@ -148,6 +175,7 @@
                             卡顿等待时长由房主管理。
                         </p>
                     </section>
+                    -->
                 </div>
             </details>
 
@@ -212,6 +240,21 @@
                 </label>
             </section>
 
+            <section id="host-sharing-settings" class="host-sharing-settings hidden">
+                <label class="setting-checkbox" for="auto-share">
+                    <input id="auto-share" type="checkbox" />
+                    自动分享新视频
+                </label>
+                <button
+                    id="share-current-page"
+                    class="quiet"
+                    type="button"
+                    title="快捷键：Alt+S（Mac：Option+S）"
+                >
+                    分享当前页
+                </button>
+            </section>
+
             <div class="room-top">
                 <span>房间码</span>
                 <strong id="room-code"></strong>
@@ -270,6 +313,28 @@
             <p class="small">
                 查看成员页面的连接状态。刷新不会退出房间或刷新网页。
             </p>
+            <section class="buffering-pause-panel">
+                <strong>卡顿暂停（仅房主）</strong>
+                <label class="setting-checkbox" for="pause-on-buffer">
+                    <input id="pause-on-buffer" type="checkbox" />
+                    <span id="pause-on-buffer-label">检测到成员卡顿后暂停房间</span>
+                </label>
+                <label
+                    id="pause-on-buffer-duration-row"
+                    class="auto-pause-duration-row"
+                    for="pause-on-buffer-duration"
+                >
+                    卡顿等待
+                    <select id="pause-on-buffer-duration">
+                        <option value="3">3 秒</option>
+                        <option value="5">5 秒</option>
+                    </select>
+                </label>
+                <p id="pause-on-buffer-owner" class="small hidden">
+                    卡顿等待时长由房主管理。
+                </p>
+                <p class="small">设置只对房主显示；默认关闭。</p>
+            </section>
             <div id="injection-debug-list"></div>
         </details>
 

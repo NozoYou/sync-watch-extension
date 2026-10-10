@@ -7,6 +7,28 @@ let memberSearchQuery = '';
 let selectedPermissionTemplate = '';
 let displayNameEdited = false;
 let pendingDisplayNameSave = null;
+let displayNameComposing = false;
+
+function updateLocalGreeting() {
+    const hour = new Date().getHours();
+    let greeting = '晚上好';
+
+    if (hour >= 5 && hour < 11) greeting = '早上好';
+    else if (hour >= 11 && hour < 13) greeting = '中午好';
+    else if (hour >= 13 && hour < 18) greeting = '下午好';
+
+    getElement('local-greeting').textContent = greeting;
+}
+
+function setDisplayNameEditing(isEditing) {
+    getElement('display-name-trigger').classList.toggle('hidden', isEditing);
+    getElement('display-name-editor').classList.toggle('hidden', !isEditing);
+
+    if (isEditing) {
+        getElement('display-name').focus();
+        getElement('display-name').select();
+    }
+}
 
 function formatPlaybackTime(seconds) {
     const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -62,12 +84,10 @@ function renderPlaybackProgress() {
 }
 
 function renderSavedProgress(state) {
-    const panel = getElement('saved-progress-panel');
     const list = getElement('saved-progress-list');
     const items = Array.isArray(state.savedProgress) ? state.savedProgress : [];
     const canSave = !!state.room && !!state.connected && !!state.currentPlayback;
 
-    panel.classList.toggle('hidden', !state.room && items.length === 0);
     getElement('saved-progress-summary').textContent = items.length
         ? `本地保存的进度（${items.length}）`
         : '本地保存的进度';
@@ -609,6 +629,27 @@ function render(state) {
     renderSavedProgress(state);
     syncRecommendationButtonVisibility(state);
 
+    const savedDisplayName = String(state.displayName || '').trim();
+    getElement('display-name-label').textContent = savedDisplayName || '成员';
+    updateLocalGreeting();
+
+    const displayNameInput = getElement('display-name');
+    if (pendingDisplayNameSave !== null) {
+        displayNameInput.value = pendingDisplayNameSave;
+
+        if (state.displayName === pendingDisplayNameSave) {
+            pendingDisplayNameSave = null;
+            displayNameEdited = false;
+        }
+    } else if (
+        !displayNameEdited &&
+        document.activeElement !== displayNameInput &&
+        displayNameInput.value !== (state.displayName || '')
+    ) {
+        // Background updates must not erase text while the user is editing.
+        displayNameInput.value = state.displayName || '';
+    }
+
     if (state.server) {
         getElement('server').value = state.server;
         getElement('settings-summary').textContent = '连接设置（已配置）';
@@ -626,26 +667,15 @@ function render(state) {
             : '连接中 / 正在重连';
         getElement('room-members').textContent =
             `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
-        const displayNameInput = getElement('display-name');
-        if (pendingDisplayNameSave !== null) {
-            displayNameInput.value = pendingDisplayNameSave;
-
-            if (state.displayName === pendingDisplayNameSave) {
-                pendingDisplayNameSave = null;
-                displayNameEdited = false;
-            }
-        } else if (
-            !displayNameEdited &&
-            document.activeElement !== displayNameInput &&
-            displayNameInput.value !== (state.displayName || '')
-        ) {
-            // Background updates must not erase text while the user is editing.
-            displayNameInput.value = state.displayName || '';
-        }
         renderRoomMemberList(state);
 
         const isGuest = state.role !== 'host';
+        const isHost = state.role === 'host';
         getElement('member-follow-settings').classList.remove('hidden');
+        getElement('host-sharing-settings').classList.toggle('hidden', !isHost);
+        getElement('auto-share').checked = !!state.autoShare;
+        getElement('auto-share').disabled = !state.connected;
+        getElement('share-current-page').disabled = !state.connected;
         getElement('auto-follow').checked =
             typeof state.memberSettings?.[state.clientId]?.autoFollow === 'boolean'
                 ? state.memberSettings[state.clientId].autoFollow
@@ -660,7 +690,6 @@ function render(state) {
         renderInjectionDebug(state);
         renderSelfInjectionControl(state);
 
-        const isHost = state.role === 'host';
         const ownSettings = state.memberSettings?.[state.clientId] || {};
         const canManageAutoPause =
             isHost || ownSettings.canManageAutoPause === true;
@@ -710,6 +739,10 @@ function render(state) {
         getElement('room-member-list').replaceChildren();
         getElement('room-playback').classList.add('hidden');
         getElement('member-follow-settings').classList.add('hidden');
+        getElement('host-sharing-settings').classList.add('hidden');
+        getElement('auto-share').checked = false;
+        getElement('auto-share').disabled = true;
+        getElement('share-current-page').disabled = true;
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = true;
         getElement('host-member-settings').classList.add('hidden');
@@ -766,6 +799,7 @@ chrome.storage.local.get(
         'followResponses',
         'currentPlayback',
         'savedProgress',
+        'autoShare',
         'memberInjectionStatus',
         'memberNames',
     ],
@@ -808,6 +842,21 @@ getElement('auto-follow').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_AUTO_FOLLOW',
         enabled: getElement('auto-follow').checked,
+    });
+});
+
+getElement('auto-share').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_SHARE',
+        enabled: getElement('auto-share').checked,
+    });
+});
+
+getElement('share-current-page').addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    chrome.runtime.sendMessage({
+        type: 'SHARE_CURRENT_PAGE',
+        tabId: tab?.id,
     });
 });
 
@@ -908,14 +957,28 @@ getElement('refresh-my-injection').addEventListener('click', () => {
 
 const menuToggle = getElement('menu-toggle');
 const mainMenuPanel = getElement('main-menu-panel');
+const savedProgressToggle = getElement('saved-progress-toggle');
+const savedProgressPanel = getElement('saved-progress-panel');
 
 function setMenuOpen(isOpen) {
     mainMenuPanel.classList.toggle('hidden', !isOpen);
     menuToggle.setAttribute('aria-expanded', String(isOpen));
+    if (isOpen) setSavedProgressOpen(false);
+}
+
+function setSavedProgressOpen(isOpen) {
+    savedProgressPanel.classList.toggle('hidden', !isOpen);
+    savedProgressPanel.open = isOpen;
+    savedProgressToggle.setAttribute('aria-expanded', String(isOpen));
+    if (isOpen) setMenuOpen(false);
 }
 
 menuToggle.addEventListener('click', () => {
     setMenuOpen(mainMenuPanel.classList.contains('hidden'));
+});
+
+savedProgressToggle.addEventListener('click', () => {
+    setSavedProgressOpen(savedProgressPanel.classList.contains('hidden'));
 });
 
 document.addEventListener('click', (event) => {
@@ -925,10 +988,20 @@ document.addEventListener('click', (event) => {
     ) {
         setMenuOpen(false);
     }
+
+    if (
+        !savedProgressPanel.contains(event.target) &&
+        !savedProgressToggle.contains(event.target)
+    ) {
+        setSavedProgressOpen(false);
+    }
 });
 
 document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setMenuOpen(false);
+    if (event.key === 'Escape') {
+        setMenuOpen(false);
+        setSavedProgressOpen(false);
+    }
 });
 
 getElement('copy-room').onclick = async () => {
@@ -954,13 +1027,20 @@ getElement('recommend-page').addEventListener('click', async () => {
     });
 });
 
+getElement('display-name-trigger').addEventListener('click', () => {
+    setDisplayNameEditing(true);
+});
+
 getElement('save-display-name').addEventListener('click', () => {
     const name = getElement('display-name').value.trim().slice(0, 24);
+    const savedName = name || '成员';
     pendingDisplayNameSave = name || '成员';
     displayNameEdited = false;
-    chrome.storage.local.set({ displayName: name || '成员' });
+    chrome.storage.local.set({ displayName: savedName });
     chrome.runtime.sendMessage({ type: 'SET_DISPLAY_NAME', name });
-    getElement('display-name').value = name;
+    getElement('display-name').value = savedName;
+    getElement('display-name-label').textContent = savedName;
+    setDisplayNameEditing(false);
     statusElement.textContent = name
         ? '房间显示名称已保存。'
         : '名称已清空，将显示为“成员”。';
@@ -970,9 +1050,33 @@ getElement('display-name').addEventListener('input', () => {
     displayNameEdited = true;
 });
 
-getElement('display-name').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') getElement('save-display-name').click();
+getElement('display-name').addEventListener('compositionstart', () => {
+    displayNameComposing = true;
 });
+
+getElement('display-name').addEventListener('compositionend', () => {
+    displayNameComposing = false;
+});
+
+getElement('display-name').addEventListener('keydown', (event) => {
+    const isImeConfirm =
+        displayNameComposing || event.isComposing || event.keyCode === 229;
+
+    // Enter confirms the IME candidate first; only a later Enter saves the name.
+    if (event.key === 'Enter' && !isImeConfirm) {
+        event.preventDefault();
+        getElement('save-display-name').click();
+    }
+
+    if (event.key === 'Escape') {
+        displayNameEdited = false;
+        getElement('display-name').value = lastRenderedState?.displayName || '';
+        setDisplayNameEditing(false);
+    }
+});
+
+updateLocalGreeting();
+setInterval(updateLocalGreeting, 60_000);
 
 getElement('member-search').addEventListener('input', (event) => {
     memberSearchQuery = event.target.value.trim().toLowerCase();
