@@ -232,11 +232,14 @@ function renderSelfInjectionControl(state) {
     const panel = getElement('self-injection-control');
     const refreshButton = getElement('refresh-my-injection');
     const statusLabel = getElement('self-injection-status');
-    const isMember = state.role !== 'host' && !!state.room;
+    const autoReinjectToggle = getElement('auto-reinject-same-page');
+    const isInRoom = !!state.room;
     const report = state.memberInjectionStatus?.[state.clientId];
 
-    panel.classList.toggle('hidden', !isMember);
-    if (!isMember) return;
+    panel.classList.toggle('hidden', !isInRoom);
+    if (!isInRoom) return;
+
+    autoReinjectToggle.checked = !!state.autoReinjectSamePage;
 
     if (report?.refreshing) {
         statusLabel.textContent = '正在重新注入…';
@@ -505,6 +508,7 @@ chrome.storage.local.get(
         'pauseOnBuffer',
         'pauseOnBufferDelay',
         'modifyTabIcon',
+        'autoReinjectSamePage',
         'role',
         'clientId',
         'hostClientId',
@@ -564,6 +568,13 @@ getElement('modify-tab-icon').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_TAB_ICON',
         enabled: getElement('modify-tab-icon').checked,
+    });
+});
+
+getElement('auto-reinject-same-page').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_REINJECT_SAME_PAGE',
+        enabled: getElement('auto-reinject-same-page').checked,
     });
 });
 

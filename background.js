@@ -16,6 +16,7 @@ const state = {
     room: '',
     role: '',
     modifyTabIcon: false,
+    autoReinjectSamePage: false,
     status: '打开视频页面后创建房间，或输入房间码加入。',
     connected: false,
     memberCount: 0,
@@ -56,6 +57,7 @@ const ready = chrome.storage.local
         'room',
         'role',
         'modifyTabIcon',
+        'autoReinjectSamePage',
         'tabId',
         'videoFrameId',
         'videoReady',
@@ -98,6 +100,7 @@ function persist() {
         room: state.room,
         role: state.role,
         modifyTabIcon: state.modifyTabIcon,
+        autoReinjectSamePage: state.autoReinjectSamePage,
         status: state.status,
         connected: state.connected,
         memberCount: state.memberCount,
@@ -1182,6 +1185,9 @@ function hostPageDetected(tabId, candidate) {
     }
 
     if (pageUrl === state.currentVideoUrl) {
+        const restoringClosedTab = state.tabId === null;
+        if (restoringClosedTab && !state.autoReinjectSamePage) return;
+
         if (
             state.tabId !== tabId ||
             state.videoFrameId !== candidate.frameId ||
@@ -1192,6 +1198,10 @@ function hostPageDetected(tabId, candidate) {
             state.videoReady = true;
             sendRoomTabState(candidate.frameId);
             publish();
+
+            if (restoringClosedTab) {
+                void handleReinjectionRequest(state.clientId);
+            }
         }
 
         // A room created before the video frame was detected still shares its first page.
@@ -1308,10 +1318,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             if (
                 state.room &&
                 state.role !== 'host' &&
+                state.autoReinjectSamePage &&
                 state.tabId === null &&
                 candidate.pageUrl === state.currentVideoUrl
             ) {
                 switchRoomTab(tabId);
+                await handleReinjectionRequest(state.clientId);
             }
 
             if (tabId === state.tabId) {
@@ -1735,6 +1747,32 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.modifyTabIcon = !!message.enabled;
             publish();
             setTabMarker(state.tabId, !!state.room);
+            return;
+        }
+
+        if (message.type === 'SET_AUTO_REINJECT_SAME_PAGE') {
+            state.autoReinjectSamePage = !!message.enabled;
+            publish();
+
+            if (
+                state.autoReinjectSamePage &&
+                state.room &&
+                state.tabId === null
+            ) {
+                const matchingTabId = await resolveRoomTab();
+                if (matchingTabId !== null) {
+                    switchRoomTab(matchingTabId);
+                    const selected = selectVideoFrame(matchingTabId);
+
+                    if (selected) {
+                        state.currentVideoUrl = selected.pageUrl;
+                        state.videoReady = selected.hasVideo;
+                        sendRoomTabState(selected.frameId);
+                        publishInjectionStatus();
+                        await handleReinjectionRequest(state.clientId);
+                    }
+                }
+            }
             return;
         }
 
