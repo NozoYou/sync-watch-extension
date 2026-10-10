@@ -18,6 +18,18 @@
     const isTop = window === window.top;
     const expectedMediaEvents = new WeakMap();
     const pageEventController = new AbortController();
+    const activeControlPointers = new Set();
+    const playbackKeys = new Set([
+        'Space',
+        'ArrowLeft',
+        'ArrowRight',
+        'KeyJ',
+        'KeyK',
+        'KeyL',
+        'MediaPlayPause',
+        'MediaPlay',
+        'MediaPause',
+    ]);
 
     let video = null;
     let videoBindingId = 0;
@@ -26,6 +38,8 @@
     let lastInjectionSignature = '';
     let lastInjectionReportAt = 0;
     let role = '';
+    let lastPlaybackKeyAt = 0;
+    let lastPointerControlAt = 0;
     let waitingForRoomPlayback = false;
     let autoPauseTimer = null;
     let lastAutoPauseId = '';
@@ -71,9 +85,14 @@
         return readyVideos[0] || videos[0] || null;
     }
 
-    function videoState(currentVideo, action = 'snapshot') {
+    function videoState(
+        currentVideo,
+        action = 'snapshot',
+        manualControl = false,
+    ) {
         return {
             action,
+            manualControl,
             time: Number(currentVideo.currentTime) || 0,
             duration: Number.isFinite(currentVideo.duration)
                 ? currentVideo.duration
@@ -87,6 +106,77 @@
                 '',
             ),
         };
+    }
+
+    function isInsideVideoArea(event, currentVideo) {
+        const eventPath = event.composedPath?.() || [];
+        if (eventPath.includes(currentVideo)) return true;
+
+        const bounds = currentVideo.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return false;
+
+        // Most custom player controls overlay the video or sit just below it.
+        const controlMargin = 48;
+        return (
+            event.clientX >= bounds.left - controlMargin &&
+            event.clientX <= bounds.right + controlMargin &&
+            event.clientY >= bounds.top - controlMargin &&
+            event.clientY <= bounds.bottom + controlMargin
+        );
+    }
+
+    function trackPlaybackIntent() {
+        const isTrustedPlayerPointer = (event) =>
+            event.isTrusted &&
+            video &&
+            isInsideVideoArea(event, video);
+
+        document.addEventListener(
+            'pointerdown',
+            (event) => {
+                if (!isTrustedPlayerPointer(event)) return;
+
+                activeControlPointers.add(event.pointerId);
+                lastPointerControlAt = Date.now();
+            },
+            { capture: true, signal: pageEventController.signal },
+        );
+
+        document.addEventListener(
+            'pointerup',
+            (event) => {
+                if (!activeControlPointers.delete(event.pointerId)) return;
+                lastPointerControlAt = Date.now();
+            },
+            { capture: true, signal: pageEventController.signal },
+        );
+
+        document.addEventListener(
+            'pointercancel',
+            (event) => activeControlPointers.delete(event.pointerId),
+            { capture: true, signal: pageEventController.signal },
+        );
+
+        document.addEventListener(
+            'keydown',
+            (event) => {
+                if (event.isTrusted && playbackKeys.has(event.code)) {
+                    lastPlaybackKeyAt = Date.now();
+                }
+            },
+            { capture: true, signal: pageEventController.signal },
+        );
+    }
+
+    function hasRecentPlaybackIntent() {
+        if (role === 'host') return true;
+
+        const now = Date.now();
+        const pointerIntent =
+            activeControlPointers.size > 0 || now - lastPointerControlAt < 900;
+        const keyboardIntent = now - lastPlaybackKeyAt < 900;
+
+        return pointerIntent || keyboardIntent;
     }
 
     // Mark events caused by a remote update so they are not sent back as user input.
@@ -148,6 +238,20 @@
         if (waitingForRoomPlayback) return;
         if (isExpectedMediaEvent(currentVideo, action)) return;
 
+        // Browser autoplay and page scripts can emit the same media events as
+        // a person's controls. Members only send playback changes after a
+        // trusted gesture on the player (or a playback keyboard shortcut).
+        const isPlaybackControl = [
+            'play',
+            'pause',
+            'seeking',
+            'seeked',
+            'ratechange',
+        ].includes(action);
+        const manualControl =
+            isPlaybackControl && hasRecentPlaybackIntent();
+        if (role !== 'host' && isPlaybackControl && !manualControl) return;
+
         const now = Date.now();
         const isSeeking = action === 'seeking';
 
@@ -159,7 +263,11 @@
         chrome.runtime
             .sendMessage({
                 type: 'VIDEO_OUT',
-                videoState: videoState(currentVideo, isSeeking ? 'seek' : action),
+                videoState: videoState(
+                    currentVideo,
+                    isSeeking ? 'seek' : action,
+                    manualControl,
+                ),
                 snapshot,
             })
             .catch(() => {});
@@ -224,6 +332,8 @@
             );
         }
     }
+
+    trackPlaybackIntent();
 
     function reportBufferingStatus(buffering, currentVideo) {
         bufferingReported = buffering;
@@ -726,6 +836,7 @@
             .sendMessage({
                 type: 'VIDEO_FRAME',
                 hasVideo: !!video && video.readyState > 0,
+                readyState: video?.readyState || 0,
                 score,
                 pageUrl: location.href,
                 title: document.title,

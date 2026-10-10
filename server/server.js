@@ -14,8 +14,9 @@ const rooms = new Map();
 
 function defaultMemberSettings() {
     return {
-        canControlPlayback: true,
-        canSeek: true,
+        // New members cannot control shared playback until the host grants it.
+        canControlPlayback: false,
+        canSeek: false,
         autoFollow: true,
         canManageAutoPause: false,
         autoPauseEnabled: false,
@@ -463,10 +464,21 @@ webSocketServer.on('connection', (webSocket) => {
                 (message.event === 'video' || message.event === 'snapshot') &&
                 webSocket.clientId !== room.hostClientId
             ) {
+                // Only the host may publish a snapshot as the room's source state.
+                // Followers can send controls only when backed by a local gesture.
+                if (message.event === 'snapshot') return;
+
                 const memberSettings =
                     room.memberSettings.get(webSocket.clientId) ||
                     defaultMemberSettings();
                 const action = message.payload.action;
+                const isManualControlAction = [
+                    'play',
+                    'pause',
+                    'seek',
+                    'seeked',
+                    'ratechange',
+                ].includes(action);
 
                 // Enforce room permissions before relaying a member's control to anyone.
                 if (
@@ -474,6 +486,8 @@ webSocketServer.on('connection', (webSocket) => {
                         !memberSettings.canControlPlayback) ||
                     (['seek', 'seeked'].includes(action) &&
                         !memberSettings.canSeek) ||
+                    (isManualControlAction &&
+                        message.payload.manualControl !== true) ||
                     action === 'time'
                 ) {
                     return;

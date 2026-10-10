@@ -229,8 +229,10 @@ function setStatus(status) {
 
 function defaultMemberSettings() {
     return {
-        canControlPlayback: true,
-        canSeek: true,
+        // Keep late joiners' local autoplay or saved-position events from
+        // controlling the room until the host explicitly grants permission.
+        canControlPlayback: false,
+        canSeek: false,
         autoFollow: true,
         canManageAutoPause: false,
         autoPauseEnabled: false,
@@ -410,8 +412,8 @@ function finishRoomVideoInjection(tabId) {
     state.followingHost = true;
     state.currentVideoUrl = roomVideoNavigation.url;
 
-    const frame = bestVideoFrame(tabId);
-    if (frame?.hasVideo) {
+    const frame = bestVideoFrame(tabId, roomVideoNavigation.url);
+    if (isVideoFrameReady(frame)) {
         state.videoFrameId = frame.frameId;
         state.videoReady = false;
         sendTab(
@@ -441,6 +443,29 @@ async function openRoomVideo(url, requestedTabId) {
 
     // The host owns the source tab and does not need to wait for a remote sync.
     if (state.role === 'host') {
+        const tab = await chrome.tabs.get(requestedTabId).catch(() => null);
+        if (!tab) return;
+
+        switchRoomTab(requestedTabId);
+        state.currentVideoUrl = safeUrl;
+
+        const currentFrame = bestVideoFrame(requestedTabId, safeUrl);
+        if (normalizedPageUrl(tab.url) === normalizedPageUrl(safeUrl)) {
+            // Selecting the current room page should not reload the host's video.
+            state.videoFrameId = currentFrame?.frameId ?? 0;
+            state.videoReady = isVideoFrameReady(currentFrame);
+            sendRoomTabState(state.videoFrameId);
+            await handleReinjectionRequest(state.clientId);
+            if (state.videoReady) {
+                sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
+            }
+            publish();
+            return;
+        }
+
+        state.videoFrameId = 0;
+        state.videoReady = false;
+        publish();
         await chrome.tabs
             .update(requestedTabId, { url: safeUrl })
             .catch(() => null);
@@ -772,16 +797,34 @@ function safePageUrl(value) {
     }
 }
 
-function bestVideoFrame(tabId) {
+function isVideoFrameReady(frame) {
+    // HAVE_CURRENT_DATA (2) means the player has enough data to display a frame.
+    return !!frame?.hasVideo && Number(frame.readyState) >= 2;
+}
+
+function bestVideoFrame(tabId, pageUrl = '') {
+    const expectedUrl = pageUrl ? normalizedPageUrl(pageUrl) : '';
+
     return (
         [...videoFrames.values()]
-            .filter((frame) => frame.tabId === tabId && frame.hasVideo)
-            .sort((a, b) => b.score - a.score)[0] || null
+            .filter(
+                (frame) =>
+                    frame.tabId === tabId &&
+                    frame.hasVideo &&
+                    (!expectedUrl ||
+                        normalizedPageUrl(frame.pageUrl) === expectedUrl),
+            )
+            .sort(
+                (a, b) =>
+                    Number(isVideoFrameReady(b)) -
+                        Number(isVideoFrameReady(a)) ||
+                    b.score - a.score,
+            )[0] || null
     );
 }
 
-function selectVideoFrame(tabId) {
-    const frame = bestVideoFrame(tabId);
+function selectVideoFrame(tabId, pageUrl = '') {
+    const frame = bestVideoFrame(tabId, pageUrl);
     state.videoFrameId = frame?.frameId ?? 0;
     return frame;
 }
@@ -1508,17 +1551,25 @@ async function chooseNavigation(shouldFollow, navigation) {
         state.currentVideoUrl = navigation.url;
         beginInitialRoomPlaybackSync();
 
-        let tabExists = false;
+        let existingTab = null;
         if (state.tabId !== null) {
-            try {
-                await chrome.tabs.get(state.tabId);
-                tabExists = true;
-            } catch {
-                // The old video tab may have been closed; open a new one below.
-            }
+            existingTab = await chrome.tabs.get(state.tabId).catch(() => null);
         }
 
-        if (tabExists) {
+        if (
+            existingTab &&
+            normalizedPageUrl(existingTab.url) ===
+                normalizedPageUrl(navigation.url)
+        ) {
+            // Repeated shares of the same page resync the player without
+            // discarding its current state through a needless page reload.
+            const frame = bestVideoFrame(existingTab.id, navigation.url);
+            if (isVideoFrameReady(frame)) {
+                state.videoFrameId = frame.frameId;
+                sendRoomTabState(frame.frameId);
+                requestInitialRoomPlaybackSnapshot();
+            }
+        } else if (existingTab) {
             chrome.tabs.update(state.tabId, { url: navigation.url });
         } else {
             chrome.tabs.create({ url: navigation.url }, (tab) => {
@@ -1538,7 +1589,13 @@ async function chooseNavigation(shouldFollow, navigation) {
 function shareHostPage(candidate, { requireVideo = false } = {}) {
     if (state.role !== 'host' || !state.room || !candidate) return false;
 
-    const selected = bestVideoFrame(candidate.tabId);
+    const bestFrame = bestVideoFrame(candidate.tabId, candidate.url);
+    const selected =
+        bestFrame &&
+        normalizedPageUrl(bestFrame.pageUrl) ===
+            normalizedPageUrl(candidate.url)
+            ? bestFrame
+            : null;
     if (requireVideo && !selected?.hasVideo) return false;
     const url = safePageUrl(candidate.url);
     if (!url) return false;
@@ -1549,7 +1606,7 @@ function shareHostPage(candidate, { requireVideo = false } = {}) {
 
     switchRoomTab(candidate.tabId);
     state.videoFrameId = selected?.frameId ?? candidate.frameId ?? 0;
-    state.videoReady = !!selected?.hasVideo;
+    state.videoReady = isVideoFrameReady(selected);
     sendRoomTabState(state.videoFrameId);
     sendTab({ type: 'HIDE_ROOM_PROMPT' }, 0, candidate.tabId);
     state.currentVideoUrl = url;
@@ -1566,10 +1623,12 @@ function shareHostPage(candidate, { requireVideo = false } = {}) {
     state.followResponses = state.members
         .filter((clientId) => clientId !== state.clientId)
         .map((clientId) => ({ clientId, status: 'pending' }));
-    state.status = '已分享新视频，等待成员选择是否跟随。';
+    const navigationSent = sendRoomEvent('navigate', state.sharedNavigation);
+    state.status = navigationSent
+        ? '已分享新视频，等待成员选择是否跟随。'
+        : '分享记录已保存到本地，但信令服务器未连接，成员没有收到。';
 
     publish();
-    sendRoomEvent('navigate', state.sharedNavigation);
     startAutoPauseWhenReady();
     if (selected?.hasVideo) {
         sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
@@ -1582,8 +1641,18 @@ async function shareCurrentPage(tabId) {
     if (state.role !== 'host' || !Number.isInteger(tabId)) return;
 
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    const frame = bestVideoFrame(tabId);
-    const url = safePageUrl(frame?.pageUrl || tab?.url);
+    if (!tab) {
+        state.status = '找不到当前标签页，请重新打开插件后再分享。';
+        publish();
+        return false;
+    }
+
+    const tabUrl = safePageUrl(tab?.url);
+    const frame = bestVideoFrame(tabId, tabUrl);
+    const frameMatchesTab =
+        frame &&
+        normalizedPageUrl(frame.pageUrl) === normalizedPageUrl(tabUrl);
+    const url = tabUrl || safePageUrl(frame?.pageUrl);
     if (!url) {
         state.status = '当前标签页无法分享，请切换到普通网页后重试。';
         publish();
@@ -1592,9 +1661,9 @@ async function shareCurrentPage(tabId) {
 
     const candidate = {
         tabId,
-        frameId: frame?.frameId ?? 0,
+        frameId: frameMatchesTab ? frame.frameId : 0,
         url,
-        title: frame?.title || tab?.title || '当前页面',
+        title: (frameMatchesTab ? frame.title : '') || tab?.title || '当前页面',
     };
     state.hostCandidate = candidate;
     if (!shareHostPage(candidate)) {
@@ -1616,7 +1685,7 @@ function hostPageDetected(tabId, candidate) {
         state.currentVideoUrl = pageUrl;
         switchRoomTab(tabId);
         state.videoFrameId = candidate.frameId;
-        state.videoReady = true;
+        state.videoReady = isVideoFrameReady(candidate);
         sendRoomTabState(candidate.frameId);
 
         if (!state.sharedNavigation) {
@@ -1647,7 +1716,7 @@ function hostPageDetected(tabId, candidate) {
         ) {
             switchRoomTab(tabId);
             state.videoFrameId = candidate.frameId;
-            state.videoReady = true;
+            state.videoReady = isVideoFrameReady(candidate);
             sendRoomTabState(candidate.frameId);
             publish();
 
@@ -1831,6 +1900,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 tabId,
                 frameId,
                 hasVideo: !!message.hasVideo,
+                readyState: Number(message.readyState) || 0,
                 score: message.score || 0,
                 pageUrl: sender.tab.url || message.pageUrl || '',
                 title: sender.tab.title || message.title || '新视频',
@@ -1881,14 +1951,26 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 setTabMarker(tabId, true);
                 const wasReady = state.videoReady;
                 const previousVideoFrameId = state.videoFrameId;
-                const selected = selectVideoFrame(tabId);
+                const selected = selectVideoFrame(
+                    tabId,
+                    state.currentVideoUrl,
+                );
 
                 if (
                     selected &&
                     state.role === 'host' &&
                     selected.pageUrl === state.currentVideoUrl
                 ) {
-                    state.videoReady = true;
+                    state.videoReady = isVideoFrameReady(selected);
+
+                    // A peer may request a snapshot before this player is
+                    // ready. Send the host state again as soon as it can report.
+                    if (!wasReady && state.videoReady) {
+                        sendTab(
+                            { type: 'GET_VIDEO_SNAPSHOT' },
+                            selected.frameId,
+                        );
+                    }
                 } else if (
                     selected &&
                     state.role !== 'host' &&
@@ -1899,15 +1981,20 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     if (awaitingInitialRoomPlayback) {
                         state.videoReady = false;
                         if (
+                            isVideoFrameReady(selected) &&
                             normalizedPageUrl(selected.pageUrl) ===
                             normalizedPageUrl(state.sharedNavigation?.url)
                         ) {
                             requestInitialRoomPlaybackSnapshot();
                         }
                     } else {
-                        state.videoReady = true;
+                        state.videoReady = isVideoFrameReady(selected);
 
-                        if (!wasReady && state.sharedNavigation) {
+                        if (
+                            !wasReady &&
+                            state.videoReady &&
+                            state.sharedNavigation
+                        ) {
                             sendRoomEvent('snapshot-request', {
                                 navigationId: state.sharedNavigation.id,
                             });
@@ -1950,6 +2037,24 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
             const action = message.videoState?.action;
             const ownSettings = getMemberSettings(state.clientId);
+            const isManualControlAction = [
+                'play',
+                'pause',
+                'seek',
+                'seeked',
+                'ratechange',
+            ].includes(action);
+
+            // A member's page can autoplay or restore its own watch position
+            // after joining. Only player gestures may control the room.
+            if (
+                state.role !== 'host' &&
+                (message.snapshot ||
+                    (isManualControlAction &&
+                        message.videoState?.manualControl !== true))
+            ) {
+                return;
+            }
 
             // A manual host pause during a buffering pause should prevent auto-resume.
             if (state.role === 'host' && state.bufferPause && action === 'pause') {
@@ -2371,11 +2476,14 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 const matchingTabId = await resolveRoomTab();
                 if (matchingTabId !== null) {
                     switchRoomTab(matchingTabId);
-                    const selected = selectVideoFrame(matchingTabId);
+                    const selected = selectVideoFrame(
+                        matchingTabId,
+                        state.currentVideoUrl,
+                    );
 
                     if (selected) {
                         state.currentVideoUrl = selected.pageUrl;
-                        state.videoReady = selected.hasVideo;
+                        state.videoReady = isVideoFrameReady(selected);
                         sendRoomTabState(selected.frameId);
                         publishInjectionStatus();
                         await handleReinjectionRequest(state.clientId);
@@ -2412,8 +2520,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
             state.currentPlayback = null;
 
-            const frame = selectVideoFrame(state.tabId);
-            state.videoReady = !!frame;
+            const frame = selectVideoFrame(
+                state.tabId,
+                state.currentVideoUrl,
+            );
+            state.videoReady = isVideoFrameReady(frame);
             state.clientId = '';
             state.hostClientId = '';
             state.members = [];
@@ -2479,8 +2590,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.currentVideoUrl = tab?.url || '';
             state.currentPlayback = null;
 
-            const frame = selectVideoFrame(state.tabId);
-            state.videoReady = !!frame;
+            const frame = selectVideoFrame(
+                state.tabId,
+                state.currentVideoUrl,
+            );
+            state.videoReady = isVideoFrameReady(frame);
             state.clientId = '';
             state.hostClientId = '';
             state.memberCount = 0;

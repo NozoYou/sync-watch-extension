@@ -228,8 +228,8 @@ function renderHostMemberSettings(state) {
         if (memberSearchQuery && !searchable.includes(memberSearchQuery)) continue;
 
         const settings = {
-            canControlPlayback: true,
-            canSeek: true,
+            canControlPlayback: false,
+            canSeek: false,
             canManageAutoPause: false,
             autoPauseEnabled: false,
             canManagePauseOnBuffer: false,
