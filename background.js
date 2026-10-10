@@ -27,7 +27,9 @@ const state = {
     videoReady: false,
     clientId: '',
     hostClientId: '',
+    displayName: '',
     members: [],
+    memberNames: {},
     memberSettings: {},
     memberInjectionStatus: {},
     navigationHistory: [],
@@ -63,7 +65,9 @@ const ready = chrome.storage.local
         'videoReady',
         'clientId',
         'hostClientId',
+        'displayName',
         'members',
+        'memberNames',
         'memberSettings',
         'memberInjectionStatus',
         'navigationHistory',
@@ -111,7 +115,9 @@ function persist() {
         videoReady: state.videoReady,
         clientId: state.clientId,
         hostClientId: state.hostClientId,
+        displayName: state.displayName,
         members: state.members,
+        memberNames: state.memberNames,
         memberSettings: state.memberSettings,
         memberInjectionStatus: state.memberInjectionStatus,
         navigationHistory: state.navigationHistory,
@@ -640,6 +646,7 @@ async function connectRoom() {
                 room: state.room,
                 clientId: state.clientId,
                 role: state.role,
+                displayName: state.displayName,
             }),
         );
 
@@ -665,6 +672,9 @@ async function connectRoom() {
             state.connected = true;
             state.roomLimit = message.limit || 4;
             state.members = [...(message.peers || []), message.clientId];
+            state.memberNames = { ...(message.memberNames || {}) };
+            state.memberNames[state.clientId] =
+                state.memberNames[state.clientId] || state.displayName || '成员';
             state.memberInjectionStatus = {};
             state.memberCount = state.members.length;
             state.hostClientId =
@@ -673,6 +683,7 @@ async function connectRoom() {
                     ? message.clientId
                     : (message.peers || [])[0] || message.clientId);
             mergeRoomMemberSettings(message.memberSettings);
+            sendRoomEvent('member-name', { name: state.displayName || '成员' });
             const locallySavedHistory = state.navigationHistory;
             state.navigationHistory = [];
             mergeNavigationHistory([
@@ -760,6 +771,8 @@ async function connectRoom() {
             }
 
             getMemberSettings(message.clientId);
+            state.memberNames[message.clientId] =
+                message.displayName || state.memberNames[message.clientId] || '成员';
             state.memberCount = state.members.length;
 
             if (state.sharedNavigation) {
@@ -782,6 +795,7 @@ async function connectRoom() {
         if (message.type === 'peer-left') {
             state.members = state.members.filter((id) => id !== message.clientId);
             delete state.memberInjectionStatus[message.clientId];
+            delete state.memberNames[message.clientId];
             state.bufferingMembers = state.bufferingMembers.filter(
                 (clientId) => clientId !== message.clientId,
             );
@@ -995,6 +1009,17 @@ function handleRoomEvent(message) {
             return;
         }
 
+        publish();
+        return;
+    }
+
+    if (message.event === 'member-name') {
+        const name = String(message.payload?.name || '成员')
+            .replace(/[\u0000-\u001f\u007f]/g, '')
+            .trim()
+            .slice(0, 24) || '成员';
+        state.memberNames[message.from] = name;
+        if (message.from === state.clientId) state.displayName = name;
         publish();
         return;
     }
@@ -1750,6 +1775,24 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (message.type === 'SET_DISPLAY_NAME') {
+            const displayName = String(message.name || '')
+                .replace(/[\u0000-\u001f\u007f]/g, '')
+                .trim()
+                .slice(0, 24) || '成员';
+            state.displayName = displayName;
+
+            if (state.clientId) {
+                state.memberNames[state.clientId] = displayName;
+                if (state.connected) {
+                    sendRoomEvent('member-name', { name: displayName });
+                }
+            }
+
+            publish();
+            return;
+        }
+
         if (message.type === 'SET_AUTO_REINJECT_SAME_PAGE') {
             state.autoReinjectSamePage = !!message.enabled;
             publish();
@@ -1800,6 +1843,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.clientId = '';
             state.hostClientId = '';
             state.members = [];
+            state.memberNames = {};
             state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];
@@ -1861,6 +1905,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.hostClientId = '';
             state.memberCount = 0;
             state.members = [];
+            state.memberNames = {};
             state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];
@@ -1895,6 +1940,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberCount = 0;
             state.dataConnections = 0;
             state.members = [];
+            state.memberNames = {};
             state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.navigationHistory = [];

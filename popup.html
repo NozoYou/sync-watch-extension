@@ -13,28 +13,144 @@
                 <h1>一起看</h1>
                 <p>小房间网页视频同步</p>
             </div>
-        </header>
-
-        <!-- Server settings stay collapsed after a server address is saved. -->
-        <details id="connection-settings">
-            <summary id="settings-summary">连接设置</summary>
-            <label for="server">信令服务器地址</label>
-            <div class="server-row">
-                <input
-                    id="server"
-                    type="password"
-                    placeholder="wss://域名/ws 或 ws://主机公网IP:8787/ws"
-                    spellcheck="false"
-                    autocomplete="off"
-                />
-                <button id="toggle-server" class="quiet" type="button">
-                    显示
+            <div class="header-actions">
+                <button
+                    id="refresh-my-injection"
+                    class="icon-button header-refresh hidden"
+                    type="button"
+                    aria-label="刷新当前页同步"
+                    title="刷新当前页同步"
+                >
+                    ↻
+                </button>
+                <button
+                    id="menu-toggle"
+                    class="icon-button menu-toggle"
+                    type="button"
+                    aria-label="打开功能菜单"
+                    aria-expanded="false"
+                    title="功能菜单"
+                >
+                    ☰
                 </button>
             </div>
-            <p class="small" id="server-help">
-                地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
-            </p>
-        </details>
+        </header>
+
+        <div id="main-menu-panel" class="main-menu-panel hidden">
+            <section class="display-name-panel">
+                <label for="display-name">房间显示名称</label>
+                <div class="display-name-row">
+                    <input id="display-name" maxlength="24" placeholder="输入大家看到的名字" autocomplete="nickname" />
+                    <button id="save-display-name" class="quiet" type="button">保存</button>
+                </div>
+                <p class="small">保存后会同步给房间内所有人。</p>
+            </section>
+
+            <!-- Server settings stay collapsed after a server address is saved. -->
+            <details id="connection-settings">
+                <summary id="settings-summary">连接设置</summary>
+                <label for="server">信令服务器地址</label>
+                <div class="server-row">
+                    <input
+                        id="server"
+                        type="password"
+                        placeholder="wss://域名/ws 或 ws://主机公网IP:8787/ws"
+                        spellcheck="false"
+                        autocomplete="off"
+                    />
+                    <button id="toggle-server" class="quiet" type="button">
+                        显示
+                    </button>
+                </div>
+                <p class="small" id="server-help">
+                    地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
+                </p>
+            </details>
+
+            <details id="playback-settings" class="feature-menu">
+                <summary>播放与跟随设置</summary>
+                <div class="feature-menu-content">
+                    <div id="auto-follow-control" class="auto-follow-control hidden">
+                        <label class="setting-checkbox" for="auto-follow">
+                            <input id="auto-follow" type="checkbox" />
+                            自动跟随房主分享的新视频
+                        </label>
+                    </div>
+
+                    <section id="auto-pause-panel" class="auto-pause-panel">
+                        <label class="setting-checkbox" for="auto-pause">
+                            <input id="auto-pause" type="checkbox" />
+                            <span id="auto-pause-label">新视频就绪后自动暂停</span>
+                        </label>
+                        <label
+                            id="auto-pause-duration-row"
+                            class="auto-pause-duration-row"
+                            for="auto-pause-duration"
+                        >
+                            暂停时长
+                            <select id="auto-pause-duration">
+                                <option value="3">3 秒</option>
+                                <option value="5">5 秒</option>
+                                <option value="10">10 秒</option>
+                                <option value="manual">直到点击播放</option>
+                            </select>
+                        </label>
+                        <p id="auto-pause-owner" class="small hidden">
+                            自动暂停时长由房主管理。
+                        </p>
+                    </section>
+
+                    <section class="buffering-pause-panel">
+                        <label class="setting-checkbox" for="pause-on-buffer">
+                            <input id="pause-on-buffer" type="checkbox" />
+                            <span id="pause-on-buffer-label">有人卡顿时暂停全房间</span>
+                        </label>
+                        <label
+                            id="pause-on-buffer-duration-row"
+                            class="auto-pause-duration-row"
+                            for="pause-on-buffer-duration"
+                        >
+                            卡顿等待
+                            <select id="pause-on-buffer-duration">
+                                <option value="3">3 秒</option>
+                                <option value="5">5 秒</option>
+                            </select>
+                        </label>
+                        <p id="pause-on-buffer-owner" class="small hidden">
+                            卡顿等待时长由房主管理。
+                        </p>
+                    </section>
+                </div>
+            </details>
+
+            <details id="tab-settings" class="feature-menu hidden">
+                <summary>标签页设置</summary>
+                <div class="feature-menu-content">
+                    <div class="tab-marker-control">
+                        <label class="setting-checkbox" for="modify-tab-icon">
+                            <input id="modify-tab-icon" type="checkbox" />
+                            修改房间标签页图标
+                        </label>
+                        <p class="small">
+                            参与同步的标签页标题会自动添加 [一起看] 前缀。
+                        </p>
+                    </div>
+
+                    <section id="self-injection-control" class="self-injection-control hidden">
+                        <label class="setting-checkbox" for="auto-reinject-same-page">
+                            <input id="auto-reinject-same-page" type="checkbox" />
+                            <span>重开相同视频页时自动重新连接</span>
+                        </label>
+                        <div class="injection-self-row">
+                            <p id="self-injection-status" class="small">
+                                此设置只保存在本机，不需要房主批准。
+                            </p>
+                        </div>
+                    </section>
+                </div>
+            </details>
+
+        </div>
 
         <!-- Create a room or join one with the code shared by the host. -->
         <div class="actions">
@@ -62,6 +178,8 @@
                 <span id="room-members">房间人数：—</span>
             </div>
 
+            <div id="room-member-list" class="room-member-list" aria-label="房间成员"></div>
+
             <!-- Shows the host's current shared title and playback position. -->
             <section id="room-playback" class="room-playback hidden">
                 <div class="room-playback-heading">
@@ -79,94 +197,6 @@
                 </div>
             </section>
 
-            <div id="auto-follow-control" class="auto-follow-control hidden">
-                <label class="setting-checkbox" for="auto-follow">
-                    <input id="auto-follow" type="checkbox" />
-                    自动跟随房主分享的新视频
-                </label>
-            </div>
-
-            <div class="tab-marker-control">
-                <label class="setting-checkbox" for="modify-tab-icon">
-                    <input id="modify-tab-icon" type="checkbox" />
-                    修改房间标签页图标
-                </label>
-                <p class="small">参与同步的标签页标题会自动添加 [一起看] 前缀。</p>
-            </div>
-
-            <section id="auto-pause-panel" class="auto-pause-panel">
-                <label class="setting-checkbox" for="auto-pause">
-                    <input id="auto-pause" type="checkbox" />
-                    <span id="auto-pause-label">新视频就绪后自动暂停</span>
-                </label>
-                <label
-                    id="auto-pause-duration-row"
-                    class="auto-pause-duration-row"
-                    for="auto-pause-duration"
-                >
-                    暂停时长
-                    <select id="auto-pause-duration">
-                        <option value="3">3 秒</option>
-                        <option value="5">5 秒</option>
-                        <option value="10">10 秒</option>
-                        <option value="manual">直到点击播放</option>
-                    </select>
-                </label>
-                <p id="auto-pause-owner" class="small hidden">
-                    自动暂停时长由房主管理。
-                </p>
-            </section>
-
-            <section class="buffering-pause-panel">
-                <label class="setting-checkbox" for="pause-on-buffer">
-                    <input id="pause-on-buffer" type="checkbox" />
-                    <span id="pause-on-buffer-label">有人卡顿时暂停全房间</span>
-                </label>
-                <label
-                    id="pause-on-buffer-duration-row"
-                    class="auto-pause-duration-row"
-                    for="pause-on-buffer-duration"
-                >
-                    卡顿等待
-                    <select id="pause-on-buffer-duration">
-                        <option value="3">3 秒</option>
-                        <option value="5">5 秒</option>
-                    </select>
-                </label>
-                <p id="pause-on-buffer-owner" class="small hidden">
-                    卡顿等待时长由房主管理。
-                </p>
-            </section>
-
-            <section id="host-member-settings" class="host-member-settings hidden">
-                <h2>成员权限</h2>
-                <div id="member-settings-list"></div>
-            </section>
-
-            <section id="self-injection-control" class="self-injection-control hidden">
-                <strong>我的标签页</strong>
-                <label class="setting-checkbox" for="auto-reinject-same-page">
-                    <input id="auto-reinject-same-page" type="checkbox" />
-                    <span>重开相同视频页时自动重新连接</span>
-                </label>
-                <p id="self-injection-status" class="small">
-                    此设置只保存在本机，不需要房主批准。
-                </p>
-                <button id="refresh-my-injection" class="quiet" type="button">
-                    重新注入我的标签页
-                </button>
-            </section>
-
-            <!-- DEBUG ZONE: keep injection diagnostics and reinjection tools isolated. -->
-            <details id="injection-debug" class="injection-debug hidden">
-                <summary>调试区：注入状态与重新注入</summary>
-                <p class="small">
-                    显示成员脚本心跳和视频监听状态。重新注入不会退出房间，
-                    但会替换当前标签页中的扩展监听器。
-                </p>
-                <div id="injection-debug-list"></div>
-            </details>
-
             <div id="navigation-panel" class="navigation-panel hidden">
                 <strong id="navigation-title"></strong>
                 <a id="navigation-url" target="_blank" rel="noreferrer"></a>
@@ -177,20 +207,38 @@
                 </div>
             </div>
 
-            <section id="share-history" class="share-history hidden">
-                <h2>分享记录</h2>
-                <div id="recent-share-list"></div>
-                <details id="older-shares" class="older-shares hidden">
-                    <summary id="older-shares-summary">更早的分享</summary>
-                    <div id="older-share-list"></div>
-                </details>
-            </section>
-
-            <details id="connection-details">
-                <summary>连接详情</summary>
-                <p>播放控制指令经房间服务器转发；视频画面和音频不会经过服务器。</p>
-            </details>
         </section>
+
+        <details id="host-member-settings" class="feature-menu host-member-settings hidden">
+            <summary>成员权限</summary>
+            <div class="member-tools">
+                <input id="member-search" type="search" placeholder="搜索名字或成员 ID" autocomplete="off" />
+                <div class="member-bulk-row">
+                    <select id="member-settings-template" aria-label="选择权限模板成员"></select>
+                    <button id="apply-member-settings-all" type="button" class="quiet">应用给其他成员</button>
+                </div>
+                <p class="small">选择一位成员作为权限模板，应用后仍可逐人调整。</p>
+            </div>
+            <div id="member-settings-list"></div>
+        </details>
+
+        <!-- DEBUG ZONE: keep page connection diagnostics separate from common controls. -->
+        <details id="injection-debug" class="injection-debug hidden">
+            <summary>调试区：页面同步状态</summary>
+            <p class="small">
+                查看成员页面的连接状态。刷新不会退出房间或刷新网页。
+            </p>
+            <div id="injection-debug-list"></div>
+        </details>
+
+        <details id="share-history" class="feature-menu share-history hidden">
+            <summary>分享记录</summary>
+            <div id="recent-share-list"></div>
+            <details id="older-shares" class="older-shares hidden">
+                <summary id="older-shares-summary">更早的分享</summary>
+                <div id="older-share-list"></div>
+            </details>
+        </details>
 
         <p id="status" role="status">
             打开视频页面后创建房间，或输入朋友分享的房间码加入。

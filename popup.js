@@ -3,6 +3,8 @@ const statusElement = getElement('status');
 let renderedHistorySignature = '';
 let currentPlayback = null;
 let lastRenderedState = null;
+let memberSearchQuery = '';
+let selectedPermissionTemplate = '';
 
 function formatPlaybackTime(seconds) {
     const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -66,9 +68,34 @@ function renderHostMemberSettings(state) {
         (clientId) => clientId !== state.hostClientId,
     );
 
+    const templateSelect = getElement('member-settings-template');
+    const currentTemplate = selectedPermissionTemplate;
+    templateSelect.replaceChildren();
+
+    for (const [index, clientId] of members.entries()) {
+        const option = document.createElement('option');
+        option.value = clientId;
+        option.textContent = `${getMemberDisplayName(state, clientId, index)} · ${clientId.slice(-6)}`;
+        templateSelect.append(option);
+    }
+
+    if (members.includes(currentTemplate)) {
+        templateSelect.value = currentTemplate;
+    } else if (members.length) {
+        selectedPermissionTemplate = members[0];
+        templateSelect.value = selectedPermissionTemplate;
+    }
+
+    getElement('apply-member-settings-all').disabled =
+        !state.connected || members.length < 2;
+
     settingsList.replaceChildren();
 
     for (const [index, clientId] of members.entries()) {
+        const displayName = getMemberDisplayName(state, clientId, index);
+        const searchable = `${displayName} ${clientId}`.toLowerCase();
+        if (memberSearchQuery && !searchable.includes(memberSearchQuery)) continue;
+
         const settings = {
             canControlPlayback: true,
             canSeek: true,
@@ -84,7 +111,7 @@ function renderHostMemberSettings(state) {
 
         const name = document.createElement('strong');
         name.className = 'member-setting-name';
-        name.textContent = `成员 ${index + 1} · ${clientId.slice(-4)}`;
+        name.textContent = `${displayName} · ${clientId.slice(-6)}`;
 
         const options = document.createElement('div');
         options.className = 'member-setting-options';
@@ -119,26 +146,7 @@ function renderHostMemberSettings(state) {
             options.append(label);
         }
 
-        const applyToRoomButton = document.createElement('button');
-        applyToRoomButton.className = 'quiet member-settings-apply-all';
-        applyToRoomButton.type = 'button';
-        applyToRoomButton.textContent = '将此成员权限应用到全房间';
-        applyToRoomButton.disabled = !state.connected || members.length < 2;
-        applyToRoomButton.title =
-            '把上方勾选的权限设置应用给房间内的所有成员';
-        applyToRoomButton.addEventListener('click', () => {
-            const permissionSettings = Object.fromEntries(
-                fields.map(([key]) => [key, !!settings[key]]),
-            );
-
-            chrome.runtime.sendMessage({
-                type: 'APPLY_MEMBER_SETTINGS_TO_ROOM',
-                sourceClientId: clientId,
-                settings: permissionSettings,
-            });
-        });
-
-        card.append(name, options, applyToRoomButton);
+        card.append(name, options);
         settingsList.append(card);
     }
 
@@ -146,6 +154,28 @@ function renderHostMemberSettings(state) {
         'hidden',
         state.role !== 'host' || members.length === 0,
     );
+}
+
+function getMemberDisplayName(state, clientId, index = 0) {
+    if (clientId === state.hostClientId) {
+        return state.memberNames?.[clientId] || '房主';
+    }
+
+    return state.memberNames?.[clientId] || `成员 ${index + 1}`;
+}
+
+function renderRoomMemberList(state) {
+    const list = getElement('room-member-list');
+    list.replaceChildren();
+
+    for (const [index, clientId] of (state.members || []).entries()) {
+        const chip = document.createElement('span');
+        chip.className = 'room-member-chip';
+        const isHost = clientId === state.hostClientId;
+        chip.textContent = `${getMemberDisplayName(state, clientId, index)}${isHost ? ' · 房主' : ''}`;
+        chip.title = clientId;
+        list.append(chip);
+    }
 }
 
 function renderInjectionDebug(state) {
@@ -165,9 +195,9 @@ function renderInjectionDebug(state) {
         let statusLabel = '等待成员上报';
 
         if (isRefreshing) {
-            statusLabel = '重新注入中';
+            statusLabel = '正在刷新';
         } else if (report?.refreshError) {
-            statusLabel = '重新注入失败';
+            statusLabel = '刷新失败';
         } else if (report?.refreshing) {
             statusLabel = '刷新请求超时';
         } else if (report && !isFresh) {
@@ -212,8 +242,11 @@ function renderInjectionDebug(state) {
 
         const refreshButton = document.createElement('button');
         refreshButton.type = 'button';
-        refreshButton.className = 'quiet';
-        refreshButton.textContent = isRefreshing ? '处理中…' : '重新注入';
+        refreshButton.className = 'icon-button';
+        refreshButton.textContent = '↻';
+        refreshButton.setAttribute('aria-label', '刷新成员同步');
+        refreshButton.title = isRefreshing ? '正在刷新' : '刷新成员同步';
+        refreshButton.classList.toggle('is-refreshing', !!isRefreshing);
         refreshButton.disabled = !state.connected || !!isRefreshing;
         refreshButton.addEventListener('click', () => {
             chrome.runtime.sendMessage({
@@ -237,29 +270,32 @@ function renderSelfInjectionControl(state) {
     const report = state.memberInjectionStatus?.[state.clientId];
 
     panel.classList.toggle('hidden', !isInRoom);
+    getElement('tab-settings').classList.toggle('hidden', !isInRoom);
+    refreshButton.classList.toggle('hidden', !isInRoom);
     if (!isInRoom) return;
 
     autoReinjectToggle.checked = !!state.autoReinjectSamePage;
 
     if (report?.refreshing) {
-        statusLabel.textContent = '正在重新注入…';
+        statusLabel.textContent = '正在刷新同步…';
     } else if (report?.refreshError) {
-        statusLabel.textContent = `重新注入失败：${report.refreshError}`;
+        statusLabel.textContent = `刷新失败：${report.refreshError}`;
     } else if (report?.responsive && report.hasVideo) {
         statusLabel.textContent = report.videoBound
-            ? '脚本已注入，视频监听正常。'
-            : '脚本已注入，当前页面尚未绑定视频。';
+            ? '当前视频已连接同步。'
+            : '已找到视频，正在连接同步。';
     } else if (report?.responsive) {
-        statusLabel.textContent = '脚本已注入，当前标签页未检测到视频。';
+        statusLabel.textContent = '当前页面暂未发现视频。';
     } else {
         statusLabel.textContent =
-            '如果页面关闭后重新打开了相同视频，可在这里重新注入。';
+            '可刷新当前页的同步状态。';
     }
 
     refreshButton.disabled = !state.connected || !!report?.refreshing;
-    refreshButton.textContent = report?.refreshing
-        ? '处理中…'
-        : '重新注入我的标签页';
+    refreshButton.textContent = '↻';
+    refreshButton.classList.toggle('is-refreshing', !!report?.refreshing);
+    refreshButton.title = report?.refreshing ? '正在刷新' : '刷新当前页同步';
+    refreshButton.setAttribute('aria-label', refreshButton.title);
 }
 
 function renderShareHistory(history = []) {
@@ -370,12 +406,15 @@ function render(state) {
 
     if (state.room) {
         getElement('room-box').classList.remove('hidden');
+        getElement('playback-settings').classList.remove('hidden');
         getElement('room-code').textContent = state.room;
         getElement('room-connection').textContent = state.connected
             ? '已连接'
             : '连接中 / 正在重连';
         getElement('room-members').textContent =
             `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
+        getElement('display-name').value = state.displayName || '';
+        renderRoomMemberList(state);
 
         const isGuest = state.role !== 'host';
         getElement('auto-follow-control').classList.toggle('hidden', !isGuest);
@@ -464,7 +503,7 @@ function render(state) {
                           const responseLabel =
                               statusLabels[response?.status] || '待回应';
 
-                          return `成员 ${index + 1}：${responseLabel}`;
+                          return `${getMemberDisplayName(state, clientId, index)}：${responseLabel}`;
                       })
                       .join('　')
                 : '目前没有其他成员。';
@@ -473,6 +512,7 @@ function render(state) {
         }
     } else {
         getElement('room-box').classList.add('hidden');
+        getElement('room-member-list').replaceChildren();
         getElement('room-playback').classList.add('hidden');
         getElement('auto-follow-control').classList.add('hidden');
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
@@ -480,6 +520,9 @@ function render(state) {
         getElement('host-member-settings').classList.add('hidden');
         getElement('injection-debug').classList.add('hidden');
         getElement('self-injection-control').classList.add('hidden');
+        getElement('tab-settings').classList.add('hidden');
+        getElement('playback-settings').classList.add('hidden');
+        getElement('refresh-my-injection').classList.add('hidden');
         getElement('auto-pause-panel').classList.add('hidden');
         getElement('pause-on-buffer').checked = false;
         getElement('pause-on-buffer').disabled = true;
@@ -512,11 +555,13 @@ chrome.storage.local.get(
         'role',
         'clientId',
         'hostClientId',
+        'displayName',
         'pendingNavigation',
         'sharedNavigation',
         'followResponses',
         'currentPlayback',
         'memberInjectionStatus',
+        'memberNames',
     ],
     render,
 );
@@ -646,7 +691,74 @@ getElement('refresh-my-injection').addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'REFRESH_MY_INJECTION' });
 });
 
+const menuToggle = getElement('menu-toggle');
+const mainMenuPanel = getElement('main-menu-panel');
+
+function setMenuOpen(isOpen) {
+    mainMenuPanel.classList.toggle('hidden', !isOpen);
+    menuToggle.setAttribute('aria-expanded', String(isOpen));
+}
+
+menuToggle.addEventListener('click', () => {
+    setMenuOpen(mainMenuPanel.classList.contains('hidden'));
+});
+
+document.addEventListener('click', (event) => {
+    if (
+        !mainMenuPanel.contains(event.target) &&
+        !menuToggle.contains(event.target)
+    ) {
+        setMenuOpen(false);
+    }
+});
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setMenuOpen(false);
+});
+
 getElement('copy-room').onclick = async () => {
     await navigator.clipboard.writeText(getElement('room-code').textContent);
     statusElement.textContent = '房间码已复制。';
 };
+
+getElement('save-display-name').addEventListener('click', () => {
+    const name = getElement('display-name').value.trim().slice(0, 24);
+    chrome.storage.local.set({ displayName: name || '成员' });
+    chrome.runtime.sendMessage({ type: 'SET_DISPLAY_NAME', name });
+    statusElement.textContent = name
+        ? '房间显示名称已保存。'
+        : '名称已清空，将显示为“成员”。';
+});
+
+getElement('display-name').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') getElement('save-display-name').click();
+});
+
+getElement('member-search').addEventListener('input', (event) => {
+    memberSearchQuery = event.target.value.trim().toLowerCase();
+    if (lastRenderedState) renderHostMemberSettings(lastRenderedState);
+});
+
+getElement('member-settings-template').addEventListener('change', (event) => {
+    selectedPermissionTemplate = event.target.value;
+});
+
+getElement('apply-member-settings-all').addEventListener('click', () => {
+    if (!lastRenderedState) return;
+    const sourceClientId = getElement('member-settings-template').value;
+    const keys = [
+        'canControlPlayback',
+        'canSeek',
+        'autoFollow',
+        'canManageAutoPause',
+        'canManagePauseOnBuffer',
+    ];
+    const settings = lastRenderedState.memberSettings?.[sourceClientId] || {};
+
+    chrome.runtime.sendMessage({
+        type: 'APPLY_MEMBER_SETTINGS_TO_ROOM',
+        sourceClientId,
+        settings: Object.fromEntries(keys.map((key) => [key, !!settings[key]])),
+    });
+    statusElement.textContent = '已将该成员的权限应用给其他成员。';
+});

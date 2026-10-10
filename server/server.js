@@ -18,6 +18,16 @@ function defaultMemberSettings() {
     };
 }
 
+// Names are plain display labels; strip control characters and cap their length.
+function sanitizeDisplayName(value) {
+    const name = String(value || '')
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .trim()
+        .slice(0, 24);
+
+    return name || '成员';
+}
+
 // HTTP is used for a simple health check; room messages travel over WebSocket.
 const server = http.createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
@@ -102,6 +112,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.pauseOnBufferDelay = 5;
                 room.hostClientId = null;
                 room.memberSettings = new Map();
+                room.memberNames = new Map();
                 rooms.set(roomId, room);
             }
 
@@ -132,6 +143,10 @@ webSocketServer.on('connection', (webSocket) => {
             if (!room.memberSettings.has(clientId)) {
                 room.memberSettings.set(clientId, defaultMemberSettings());
             }
+            const displayName = room.memberNames.has(clientId)
+                ? room.memberNames.get(clientId)
+                : sanitizeDisplayName(message.displayName);
+            room.memberNames.set(clientId, displayName);
 
             const existingMembers = [...room.keys()].filter(
                 (existingId) => existingId !== clientId,
@@ -168,6 +183,7 @@ webSocketServer.on('connection', (webSocket) => {
                     pauseOnBufferDelay: room.pauseOnBufferDelay,
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
+                    memberNames: Object.fromEntries(room.memberNames),
                 }),
             );
 
@@ -177,6 +193,7 @@ webSocketServer.on('connection', (webSocket) => {
                         JSON.stringify({
                             type: 'peer-joined',
                             clientId: webSocket.clientId,
+                            displayName,
                         }),
                     );
                 }
@@ -213,6 +230,7 @@ webSocketServer.on('connection', (webSocket) => {
                 'snapshot-request',
                 'snapshot',
                 'member-settings',
+                'member-name',
                 'room-settings',
                 'auto-pause-ready',
                 'auto-pause-start',
@@ -515,6 +533,14 @@ webSocketServer.on('connection', (webSocket) => {
                     targetClientId,
                     settings: updates,
                 };
+            }
+
+            if (message.event === 'member-name') {
+                // Each participant can choose only their own room display name.
+                const displayName = sanitizeDisplayName(message.payload.name);
+                room.memberNames.set(webSocket.clientId, displayName);
+                message.payload = { name: displayName };
+                webSocket.displayName = displayName;
             }
 
             if (message.event === 'navigate') {
