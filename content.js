@@ -348,12 +348,19 @@
             currentVideo.playbackRate = remoteState.rate;
         }
 
-        if (remoteState.paused) {
+        // Clock and seek updates describe position, not playback intent.
+        // Only an explicit play action (or an initial snapshot) may resume a
+        // paused follower; otherwise a late time update can undo a local pause.
+        const shouldResume =
+            remoteState.action === 'play' ||
+            remoteState.action === 'snapshot';
+
+        if (remoteState.action === 'pause' || remoteState.paused) {
             if (!currentVideo.paused) {
                 expectMediaEvent(currentVideo, 'paused', true);
                 currentVideo.pause();
             }
-        } else if (currentVideo.paused) {
+        } else if (shouldResume && currentVideo.paused) {
             expectMediaEvent(currentVideo, 'paused', false);
             await currentVideo.play().catch(() => {});
         }

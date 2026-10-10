@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.10.4",
+    "version": "0.10.5",
     "description": "和最多 4 位朋友同步网页视频播放。",
     "permissions": [
         "activeTab",
