@@ -5,6 +5,8 @@ let currentPlayback = null;
 let lastRenderedState = null;
 let memberSearchQuery = '';
 let selectedPermissionTemplate = '';
+let displayNameEdited = false;
+let pendingDisplayNameSave = null;
 
 function formatPlaybackTime(seconds) {
     const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -381,6 +383,77 @@ function renderShareHistory(history = []) {
     }
 }
 
+function renderRecommendations(state) {
+    const panel = getElement('recommendations-panel');
+    const list = getElement('recommendations-list');
+    const items = state.role === 'host'
+        ? (state.receivedRecommendations || []).slice(0, 20)
+        : [];
+
+    panel.classList.toggle('hidden', items.length === 0);
+    getElement('recommendations-summary').textContent =
+        `成员推荐（${items.length}）`;
+    list.replaceChildren();
+
+    for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'recommendation-item';
+
+        const details = document.createElement('div');
+        details.className = 'recommendation-details';
+
+        const title = document.createElement('strong');
+        title.className = 'recommendation-title';
+        title.textContent = item.title || '未命名页面';
+
+        const source = document.createElement('span');
+        source.className = 'recommendation-source';
+        source.textContent = `${item.name || '成员'} 推荐 · ${item.hostname || ''}`;
+
+        const actions = document.createElement('div');
+        actions.className = 'recommendation-actions';
+
+        const openButton = document.createElement('button');
+        openButton.type = 'button';
+        openButton.className = 'quiet';
+        openButton.textContent = '打开';
+        openButton.title = `在新标签页打开 ${item.hostname || '推荐页面'}`;
+        openButton.addEventListener('click', () => {
+            const url = safeHistoryUrl(item.url);
+            if (url) chrome.tabs.create({ url });
+        });
+
+        const dismissButton = document.createElement('button');
+        dismissButton.type = 'button';
+        dismissButton.className = 'quiet';
+        dismissButton.textContent = '移除';
+        dismissButton.addEventListener('click', () => {
+            chrome.runtime.sendMessage({
+                type: 'DISMISS_RECOMMENDATION',
+                id: item.id,
+            });
+        });
+
+        details.append(title, source);
+        actions.append(openButton, dismissButton);
+        row.append(details, actions);
+        list.append(row);
+    }
+}
+
+function syncRecommendationButtonVisibility(state) {
+    const button = getElement('recommend-page');
+    const isInRoom = !!state.room && state.role !== 'host';
+    button.classList.toggle('hidden', !isInRoom);
+
+    if (!isInRoom) return;
+
+    button.disabled = !state.connected;
+    button.title = state.connected
+        ? '推荐当前页面给房主'
+        : '连接房间后即可推荐';
+}
+
 function saveConfig() {
     const config = getConfig();
 
@@ -393,6 +466,7 @@ function render(state) {
     lastRenderedState = state;
     currentPlayback = state.currentPlayback || null;
     renderPlaybackProgress();
+    syncRecommendationButtonVisibility(state);
 
     if (state.server) {
         getElement('server').value = state.server;
@@ -411,7 +485,22 @@ function render(state) {
             : '连接中 / 正在重连';
         getElement('room-members').textContent =
             `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
-        getElement('display-name').value = state.displayName || '';
+        const displayNameInput = getElement('display-name');
+        if (pendingDisplayNameSave !== null) {
+            displayNameInput.value = pendingDisplayNameSave;
+
+            if (state.displayName === pendingDisplayNameSave) {
+                pendingDisplayNameSave = null;
+                displayNameEdited = false;
+            }
+        } else if (
+            !displayNameEdited &&
+            document.activeElement !== displayNameInput &&
+            displayNameInput.value !== (state.displayName || '')
+        ) {
+            // Background updates must not erase text while the user is editing.
+            displayNameInput.value = state.displayName || '';
+        }
         renderRoomMemberList(state);
 
         const isGuest = state.role !== 'host';
@@ -473,46 +562,8 @@ function render(state) {
             : '卡顿开关权限与等待时长由房主管理。';
         getElement('pause-on-buffer-owner').classList.toggle('hidden', isHost);
         renderShareHistory(state.navigationHistory || []);
+        renderRecommendations(state);
 
-        const navigation = state.pendingNavigation || state.sharedNavigation;
-
-        if (navigation) {
-            getElement('navigation-panel').classList.remove('hidden');
-            getElement('navigation-title').textContent = state.pendingNavigation
-                ? `主机分享：${navigation.title || navigation.url}`
-                : `当前分享：${navigation.title || navigation.url}`;
-            getElement('navigation-url').textContent = navigation.url || '';
-            getElement('navigation-url').href = navigation.url || '#';
-            getElement('follow-actions').classList.toggle(
-                'hidden',
-                !state.pendingNavigation,
-            );
-
-            const members = (state.members || []).filter(
-                (clientId) => clientId !== state.hostClientId,
-            );
-            const statusLabels = {
-                pending: '待回应',
-                following: '已跟随',
-                'not-following': '未跟随',
-            };
-
-            getElement('follow-summary').textContent = members.length
-                ? members
-                      .map((clientId, index) => {
-                          const response = (state.followResponses || []).find(
-                              (item) => item.clientId === clientId,
-                          );
-                          const responseLabel =
-                              statusLabels[response?.status] || '待回应';
-
-                          return `${getMemberDisplayName(state, clientId, index)}：${responseLabel}`;
-                      })
-                      .join('　')
-                : '目前没有其他成员。';
-        } else {
-            getElement('navigation-panel').classList.add('hidden');
-        }
     } else {
         getElement('room-box').classList.add('hidden');
         getElement('room-member-list').replaceChildren();
@@ -533,9 +584,14 @@ function render(state) {
         getElement('pause-on-buffer-duration').disabled = true;
         getElement('pause-on-buffer-owner').classList.add('hidden');
         getElement('share-history').classList.add('hidden');
+        getElement('recommendations-panel').classList.add('hidden');
     }
 
-    if (state.status) statusElement.textContent = state.status;
+    if (state.recommendationStatus) {
+        statusElement.textContent = state.recommendationStatus;
+    } else if (state.status) {
+        statusElement.textContent = state.status;
+    }
 }
 
 // Populate the popup from saved state, then keep it current while it is open.
@@ -550,6 +606,8 @@ chrome.storage.local.get(
         'members',
         'memberSettings',
         'navigationHistory',
+        'receivedRecommendations',
+        'recommendationStatus',
         'autoPause',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
@@ -597,14 +655,6 @@ getElement('toggle-server').onclick = () => {
 
     input.type = shouldShow ? 'text' : 'password';
     getElement('toggle-server').textContent = shouldShow ? '隐藏' : '显示';
-};
-
-getElement('follow-yes').onclick = () => {
-    chrome.runtime.sendMessage({ type: 'FOLLOW_DECISION', follow: true });
-};
-
-getElement('follow-no').onclick = () => {
-    chrome.runtime.sendMessage({ type: 'FOLLOW_DECISION', follow: false });
 };
 
 getElement('auto-follow').addEventListener('change', () => {
@@ -674,11 +724,17 @@ async function getActiveTab() {
 
 getElement('create').onclick = async () => {
     saveConfig();
+    const requestedLimit = Number(getElement('room-capacity').value);
+    const roomLimit = Number.isInteger(requestedLimit)
+        ? Math.max(4, Math.min(16, requestedLimit))
+        : 4;
+    getElement('room-capacity').value = roomLimit;
     const tab = await getActiveTab();
 
     chrome.runtime.sendMessage({
         type: 'CREATE_ROOM',
         server: getElement('server').value.trim(),
+        roomLimit,
         tabId: tab?.id,
     });
 };
@@ -733,13 +789,38 @@ getElement('copy-room').onclick = async () => {
     statusElement.textContent = '房间码已复制。';
 };
 
+getElement('recommend-page').addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    if (!tab?.url) {
+        chrome.runtime.sendMessage({
+            type: 'RECOMMEND_ACTIVE_PAGE',
+            url: '',
+            title: '',
+        });
+        return;
+    }
+
+    chrome.runtime.sendMessage({
+        type: 'RECOMMEND_ACTIVE_PAGE',
+        url: tab.url,
+        title: tab.title || '',
+    });
+});
+
 getElement('save-display-name').addEventListener('click', () => {
     const name = getElement('display-name').value.trim().slice(0, 24);
+    pendingDisplayNameSave = name || '成员';
+    displayNameEdited = false;
     chrome.storage.local.set({ displayName: name || '成员' });
     chrome.runtime.sendMessage({ type: 'SET_DISPLAY_NAME', name });
+    getElement('display-name').value = name;
     statusElement.textContent = name
         ? '房间显示名称已保存。'
         : '名称已清空，将显示为“成员”。';
+});
+
+getElement('display-name').addEventListener('input', () => {
+    displayNameEdited = true;
 });
 
 getElement('display-name').addEventListener('keydown', (event) => {

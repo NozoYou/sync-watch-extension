@@ -32,6 +32,10 @@ header {
     margin-left: 0;
 }
 
+.recommend-page {
+    color: #c5befc;
+}
+
 .main-menu-panel {
     position: absolute;
     z-index: 20;
@@ -145,8 +149,18 @@ textarea:focus {
 }
 
 .actions #room-input {
-    width: 92px;
+    width: 78px;
     text-transform: uppercase;
+}
+
+.actions #room-capacity {
+    width: 54px;
+    padding: 9px 5px;
+}
+
+.actions .room-capacity-label {
+    margin: 0 -4px 0 0;
+    white-space: nowrap;
 }
 
 .row > * {
@@ -509,35 +523,6 @@ button:hover {
     }
 }
 
-.navigation-panel {
-    margin-top: 9px;
-    padding: 9px 10px;
-    border-radius: 8px;
-    background: #22243a;
-}
-
-.navigation-panel strong {
-    display: block;
-    color: #dedaff;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-}
-
-.navigation-panel a {
-    display: block;
-    margin-top: 5px;
-    color: #a9a0ff;
-    font-size: 10px;
-    overflow-wrap: anywhere;
-}
-
-.navigation-panel p {
-    margin: 6px 0 0;
-    color: #aab1c2;
-    font-size: 10px;
-    overflow-wrap: anywhere;
-}
-
 .share-history h2 {
     margin: 0 0 6px;
     color: #aab1c2;
@@ -580,6 +565,49 @@ button:hover {
     font-size: 10px;
 }
 
+.recommendation-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 8px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
+.recommendation-details {
+    min-width: 0;
+    flex: 1;
+}
+
+.recommendation-title,
+.recommendation-source {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.recommendation-title {
+    color: #dedaff;
+    font-size: 11px;
+}
+
+.recommendation-source {
+    margin-top: 3px;
+    color: #aab1c2;
+    font-size: 10px;
+}
+
+.recommendation-actions {
+    display: flex;
+    flex: none;
+    gap: 3px;
+}
+
+.recommendation-actions button {
+    padding: 5px 6px;
+    font-size: 10px;
+}
+
 .older-shares {
     margin-top: 6px;
     padding: 7px 8px;
@@ -587,16 +615,6 @@ button:hover {
 
 .older-shares summary {
     font-size: 10px;
-}
-
-.follow-actions {
-    display: flex;
-    gap: 7px;
-    margin-top: 9px;
-}
-
-.follow-actions .primary {
-    flex: 1;
 }
 
 /* Collapsible details and state messages. */

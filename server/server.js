@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const port = Number(process.env.PORT || 8787);
-const roomLimit = Math.max(2, Math.min(64, Number(process.env.ROOM_LIMIT || 4)));
+// ROOM_LIMIT is the server-wide ceiling; each new room can choose a smaller cap.
+const configuredRoomLimit = process.env.ROOM_LIMIT
+    ? Number(process.env.ROOM_LIMIT)
+    : Number.NaN;
+const serverRoomLimit = Number.isInteger(configuredRoomLimit)
+    ? Math.max(4, Math.min(16, configuredRoomLimit))
+    : 16;
 const rooms = new Map();
 
 function defaultMemberSettings() {
@@ -105,6 +111,14 @@ webSocketServer.on('connection', (webSocket) => {
             let room = rooms.get(roomId);
             if (!room) {
                 room = new Map();
+                const requestedLimit = Number(message.roomLimit);
+                room.limit = Math.max(
+                    4,
+                    Math.min(
+                        serverRoomLimit,
+                        Number.isInteger(requestedLimit) ? requestedLimit : 4,
+                    ),
+                );
                 room.sharedNavigation = null;
                 room.navigationHistory = [];
                 room.autoPause = { enabled: false, duration: 5 };
@@ -113,14 +127,16 @@ webSocketServer.on('connection', (webSocket) => {
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 room.memberNames = new Map();
+                room.recommendations = [];
+                room.recommendationRateLimits = new Map();
                 rooms.set(roomId, room);
             }
 
-            if (room.size >= roomLimit && !room.has(clientId)) {
+            if (room.size >= room.limit && !room.has(clientId)) {
                 webSocket.send(
                     JSON.stringify({
                         type: 'error',
-                        message: `房间已满，最多 ${roomLimit} 人。`,
+                        message: `房间已满，最多 ${room.limit} 人。`,
                     }),
                 );
                 return;
@@ -175,7 +191,7 @@ webSocketServer.on('connection', (webSocket) => {
                     type: 'joined',
                     clientId: webSocket.clientId,
                     peers: existingMembers,
-                    limit: roomLimit,
+                    limit: room.limit,
                     sharedNavigation: room.sharedNavigation,
                     navigationHistory: room.navigationHistory,
                     autoPause: room.autoPause,
@@ -184,6 +200,7 @@ webSocketServer.on('connection', (webSocket) => {
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                     memberNames: Object.fromEntries(room.memberNames),
+                    recommendations: room.recommendations || [],
                 }),
             );
 
@@ -231,6 +248,8 @@ webSocketServer.on('connection', (webSocket) => {
                 'snapshot',
                 'member-settings',
                 'member-name',
+                'video-recommendation',
+                'dismiss-recommendation',
                 'room-settings',
                 'auto-pause-ready',
                 'auto-pause-start',
@@ -542,6 +561,139 @@ webSocketServer.on('connection', (webSocket) => {
                 webSocket.displayName = displayName;
             }
 
+            if (message.event === 'video-recommendation') {
+                if (webSocket.clientId === room.hostClientId) return;
+                const now = Date.now();
+                const lastSentAt = room.recommendationRateLimits.get(
+                    webSocket.clientId,
+                ) || 0;
+
+                // Allow one recommendation per member every 15 seconds.
+                if (now - lastSentAt < 15_000) {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '推荐太频繁，请稍后再试。',
+                        }),
+                    );
+                    return;
+                }
+
+                let url;
+                try {
+                    url = new URL(message.payload.url);
+                } catch {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '无法读取当前页面链接。',
+                        }),
+                    );
+                    return;
+                }
+
+                // Recommendations can only point to ordinary web pages.
+                if (!['http:', 'https:'].includes(url.protocol)) {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '只支持推荐普通网页链接。',
+                        }),
+                    );
+                    return;
+                }
+
+                if (url.href.length > 2048) {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '链接过长，无法推荐。',
+                        }),
+                    );
+                    return;
+                }
+
+                const host = room.get(room.hostClientId);
+                if (!host || host.readyState !== WebSocket.OPEN) {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '房主当前未连接，暂时无法接收推荐。',
+                        }),
+                    );
+                    return;
+                }
+
+                // Avoid an unbounded waiting list when the host is away.
+                if (room.recommendations.length >= 20) {
+                    webSocket.send(
+                        JSON.stringify({
+                            type: 'recommendation-result',
+                            success: false,
+                            message: '房主的推荐列表已满，请稍后再试。',
+                        }),
+                    );
+                    return;
+                }
+
+                const recommendation = {
+                    id: randomUUID(),
+                    from: webSocket.clientId,
+                    name: room.memberNames.get(webSocket.clientId) || '成员',
+                    title: String(message.payload.title || url.hostname)
+                        .replace(/[\u0000-\u001f\u007f]/g, '')
+                        .slice(0, 160),
+                    url: url.href,
+                    hostname: url.hostname,
+                    createdAt: now,
+                };
+                room.recommendationRateLimits.set(webSocket.clientId, now);
+                room.recommendations.unshift(recommendation);
+                webSocket.send(
+                    JSON.stringify({
+                        type: 'recommendation-result',
+                        success: true,
+                        message: '已推荐给房主。',
+                    }),
+                );
+                host.send(
+                    JSON.stringify({
+                        type: 'room-event',
+                        from: webSocket.clientId,
+                        event: message.event,
+                        payload: recommendation,
+                    }),
+                );
+
+                return;
+            }
+
+            if (message.event === 'dismiss-recommendation') {
+                if (webSocket.clientId !== room.hostClientId) return;
+                const id = String(message.payload.id || '');
+                room.recommendations = room.recommendations.filter(
+                    (item) => item.id !== id,
+                );
+                const update = JSON.stringify({
+                    type: 'room-event',
+                    from: webSocket.clientId,
+                    event: message.event,
+                    payload: { id },
+                });
+                for (const peer of room.values()) {
+                    if (peer !== webSocket && peer.readyState === WebSocket.OPEN) {
+                        peer.send(update);
+                    }
+                }
+                return;
+            }
+
+
             if (message.event === 'navigate') {
                 if (webSocket.clientId !== room.hostClientId) return;
                 room.sharedNavigation = message.payload;
@@ -608,6 +760,6 @@ webSocketServer.on('connection', (webSocket) => {
 
 server.listen(port, '0.0.0.0', () => {
     console.log(
-        `Sync Watch signaling server listening on :${port}; room limit ${roomLimit}`,
+        `Sync Watch signaling server listening on :${port}; maximum room limit ${serverRoomLimit}`,
     );
 });

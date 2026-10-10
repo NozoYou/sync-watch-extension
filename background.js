@@ -7,6 +7,7 @@ let reconnectTimer = null;
 const videoFrames = new Map();
 const injectionFrames = new Map();
 const navigationNotificationPrefix = 'sync-watch-navigation-';
+const recommendationNotificationPrefix = 'sync-watch-recommendation-';
 
 const state = {
     server: '',
@@ -35,6 +36,8 @@ const state = {
     memberSettings: {},
     memberInjectionStatus: {},
     navigationHistory: [],
+    receivedRecommendations: [],
+    recommendationStatus: '',
     autoPause: { enabled: false, duration: 5 },
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
@@ -65,6 +68,7 @@ const ready = chrome.storage.local
         'tabId',
         'videoFrameId',
         'videoReady',
+        'roomLimit',
         'clientId',
         'hostClientId',
         'displayName',
@@ -75,6 +79,8 @@ const ready = chrome.storage.local
         'memberSettings',
         'memberInjectionStatus',
         'navigationHistory',
+        'receivedRecommendations',
+        'recommendationStatus',
         'autoPause',
         'autoPauseReady',
         'autoPauseStartedNavigationId',
@@ -127,6 +133,8 @@ function persist() {
         memberSettings: state.memberSettings,
         memberInjectionStatus: state.memberInjectionStatus,
         navigationHistory: state.navigationHistory,
+        receivedRecommendations: state.receivedRecommendations,
+        recommendationStatus: state.recommendationStatus,
         autoPause: state.autoPause,
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
@@ -628,7 +636,13 @@ function clearNavigationNotification(navigationId) {
 
 // Clicking the notification opens the popup where the URL and follow controls live.
 chrome.notifications.onClicked.addListener((notificationId) => {
-    if (!notificationId.startsWith(navigationNotificationPrefix)) return;
+    const isNavigationNotice = notificationId.startsWith(
+        navigationNotificationPrefix,
+    );
+    const isRecommendationNotice = notificationId.startsWith(
+        recommendationNotificationPrefix,
+    );
+    if (!isNavigationNotice && !isRecommendationNotice) return;
 
     chrome.notifications.clear(notificationId).catch(() => {});
 
@@ -668,6 +682,8 @@ async function connectRoom() {
                 clientId: state.clientId,
                 role: state.role,
                 displayName: state.displayName,
+                roomLimit:
+                    state.role === 'host' ? state.roomLimit || 4 : undefined,
             }),
         );
 
@@ -689,6 +705,8 @@ async function connectRoom() {
         }
 
         if (message.type === 'joined') {
+            const requestedRoomLimit =
+                state.role === 'host' ? state.roomLimit || 4 : null;
             state.clientId = message.clientId;
             state.connected = true;
             state.roomLimit = message.limit || 4;
@@ -713,6 +731,9 @@ async function connectRoom() {
                     ? message.clientId
                     : (message.peers || [])[0] || message.clientId);
             mergeRoomMemberSettings(message.memberSettings);
+            if (state.role === 'host') {
+                state.receivedRecommendations = message.recommendations || [];
+            }
             sendRoomEvent('member-name', { name: state.displayName || '成员' });
             const locallySavedHistory = state.navigationHistory;
             state.navigationHistory = [];
@@ -757,7 +778,16 @@ async function connectRoom() {
 
             if (state.role !== 'host') state.followingHost = true;
 
-            setStatus('房间连接已建立。');
+            if (
+                requestedRoomLimit &&
+                requestedRoomLimit > state.roomLimit
+            ) {
+                setStatus(
+                    `房间已连接；服务器上限为 ${state.roomLimit} 人，未达到所选人数。`,
+                );
+            } else {
+                setStatus('房间连接已建立。');
+            }
 
             if (state.tabId !== null) {
                 sendRoomTabState();
@@ -792,6 +822,13 @@ async function connectRoom() {
             }
 
             announceNavigationReady();
+            publish();
+            return;
+        }
+
+        if (message.type === 'recommendation-result') {
+            state.recommendationStatus = message.message ||
+                (message.success ? '已推荐给房主。' : '推荐发送失败。');
             publish();
             return;
         }
@@ -862,6 +899,35 @@ async function connectRoom() {
 }
 
 function handleRoomEvent(message) {
+    if (message.event === 'video-recommendation') {
+        if (state.role !== 'host' || !message.payload?.id) return;
+
+        state.receivedRecommendations = [
+            message.payload,
+            ...(state.receivedRecommendations || []).filter(
+                (item) => item.id !== message.payload.id,
+            ),
+        ].slice(0, 20);
+        state.recommendationStatus = '';
+        notifyRecommendation(message.payload);
+        publish();
+        return;
+    }
+
+    if (
+        message.event === 'dismiss-recommendation' &&
+        message.from === state.hostClientId
+    ) {
+        state.receivedRecommendations = (
+            state.receivedRecommendations || []
+        ).filter((item) => item.id !== message.payload?.id);
+        chrome.notifications
+            .clear(recommendationNotificationPrefix + message.payload?.id)
+            .catch(() => {});
+        publish();
+        return;
+    }
+
     if (
         message.event === 'refresh-member-injection' &&
         message.payload?.targetClientId === state.clientId
@@ -1149,6 +1215,21 @@ function handleRoomEvent(message) {
             );
         }
     }
+}
+
+function notifyRecommendation(recommendation) {
+    if (!chrome.notifications || !recommendation?.id) return;
+
+    chrome.notifications.create(
+        recommendationNotificationPrefix + recommendation.id,
+        {
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('notification-icon.png'),
+            title: `${recommendation.name || '成员'} 推荐了视频`,
+            message: `${recommendation.title || '未命名页面'} · ${recommendation.hostname || ''}`,
+            priority: 0,
+        },
+    ).catch(() => {});
 }
 
 async function chooseNavigation(shouldFollow, navigation) {
@@ -1817,6 +1898,42 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (message.type === 'RECOMMEND_ACTIVE_PAGE') {
+            if (!state.room || !state.connected || !state.clientId) {
+                state.recommendationStatus = '请先加入房间，再推荐视频。';
+                publish();
+                return;
+            }
+
+            const url = safePageUrl(message.url);
+            if (!url) {
+                state.recommendationStatus =
+                    '当前页面无法分享链接，请切换到普通网页后重试。';
+                publish();
+                return;
+            }
+
+            sendRoomEvent('video-recommendation', {
+                url,
+                title: String(message.title || '').slice(0, 160),
+            });
+            state.recommendationStatus = '正在发送推荐…';
+            publish();
+            return;
+        }
+
+        if (message.type === 'DISMISS_RECOMMENDATION') {
+            state.receivedRecommendations = (
+                state.receivedRecommendations || []
+            ).filter((item) => item.id !== message.id);
+            chrome.notifications
+                .clear(recommendationNotificationPrefix + message.id)
+                .catch(() => {});
+            sendRoomEvent('dismiss-recommendation', { id: message.id });
+            publish();
+            return;
+        }
+
         if (message.type === 'SET_AUTO_REINJECT_SAME_PAGE') {
             state.autoReinjectSamePage = !!message.enabled;
             publish();
@@ -1856,6 +1973,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.server = message.server || state.server;
             state.room = Math.random().toString(36).slice(2, 8).toUpperCase();
             state.role = 'host';
+            const requestedRoomLimit = Number(message.roomLimit);
+            state.roomLimit = Number.isInteger(requestedRoomLimit)
+                ? Math.max(4, Math.min(16, requestedRoomLimit))
+                : 4;
             switchRoomTab(message.tabId);
 
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);

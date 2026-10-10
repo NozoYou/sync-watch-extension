@@ -24,6 +24,15 @@
                     ↻
                 </button>
                 <button
+                    id="recommend-page"
+                    class="icon-button recommend-page hidden"
+                    type="button"
+                    aria-label="推荐当前页面给房主"
+                    title="推荐当前页面给房主"
+                >
+                    ↗
+                </button>
+                <button
                     id="menu-toggle"
                     class="icon-button menu-toggle"
                     type="button"
@@ -77,6 +86,12 @@
             <details id="playback-settings" class="feature-menu">
                 <summary>播放与标签页设置</summary>
                 <div class="feature-menu-content">
+                    <label class="setting-checkbox" for="follow-prompt-enabled">
+                        <input id="follow-prompt-enabled" type="checkbox" />
+                        跟随弹窗
+                    </label>
+                    <p class="small">控制房主分享新视频时是否弹出跟随询问。</p>
+
                     <section id="auto-pause-panel" class="auto-pause-panel">
                         <label class="setting-checkbox" for="auto-pause">
                             <input id="auto-pause" type="checkbox" />
@@ -155,6 +170,17 @@
         <!-- Create a room or join one with the code shared by the host. -->
         <div class="actions">
             <button id="create" class="primary">创建房间</button>
+            <label class="room-capacity-label" for="room-capacity">人数</label>
+            <input
+                id="room-capacity"
+                type="number"
+                min="4"
+                max="16"
+                step="1"
+                value="4"
+                aria-label="创建房间人数"
+                title="创建房间人数（4 至 16 人）"
+            />
             <input
                 id="room-input"
                 maxlength="8"
@@ -170,10 +196,6 @@
                 <label class="setting-checkbox" for="auto-follow">
                     <input id="auto-follow" type="checkbox" />
                     自动跟随房主分享的新视频
-                </label>
-                <label class="setting-checkbox" for="follow-prompt-enabled">
-                    <input id="follow-prompt-enabled" type="checkbox" />
-                    显示“房主分享了新视频，是否跟随？”弹窗
                 </label>
             </section>
 
@@ -208,16 +230,6 @@
                 </div>
             </section>
 
-            <div id="navigation-panel" class="navigation-panel hidden">
-                <strong id="navigation-title"></strong>
-                <a id="navigation-url" target="_blank" rel="noreferrer"></a>
-                <p id="follow-summary"></p>
-                <div id="follow-actions" class="follow-actions">
-                    <button id="follow-yes" class="primary">跟随跳转</button>
-                    <button id="follow-no" class="quiet">不跟随</button>
-                </div>
-            </div>
-
         </section>
 
         <details id="host-member-settings" class="feature-menu host-member-settings hidden">
@@ -249,6 +261,11 @@
                 <summary id="older-shares-summary">更早的分享</summary>
                 <div id="older-share-list"></div>
             </details>
+        </details>
+
+        <details id="recommendations-panel" class="feature-menu recommendations-panel hidden">
+            <summary id="recommendations-summary">成员推荐</summary>
+            <div id="recommendations-list"></div>
         </details>
 
         <p id="status" role="status">
