@@ -524,7 +524,11 @@ function renderShareHistory(history = []) {
     for (const view of panels) {
         view.recentList.replaceChildren();
         view.olderList.replaceChildren();
-        view.panel.classList.toggle('hidden', newestFirst.length === 0);
+        const isDisabledHistory = view.panel.id === 'share-history';
+        view.panel.classList.toggle(
+            'hidden',
+            isDisabledHistory || newestFirst.length === 0,
+        );
         view.olderList.classList.toggle('hidden', older.length === 0);
 
         for (const navigation of recent) {
