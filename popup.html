@@ -62,6 +62,19 @@
         </section>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
+            <details id="saved-progress-panel" class="feature-menu saved-progress-panel">
+                <summary id="saved-progress-summary">本地保存的进度</summary>
+                <div class="saved-progress-content">
+                    <button id="save-current-progress" class="quiet" type="button">
+                        保存当前进度
+                    </button>
+                    <p id="saved-progress-empty" class="small hidden">
+                        保存的进度只保存在本机扩展中。
+                    </p>
+                    <div id="saved-progress-list"></div>
+                </div>
+            </details>
+
             <!-- Server settings stay collapsed after a server address is saved. -->
             <details id="connection-settings">
                 <summary id="settings-summary">连接设置</summary>

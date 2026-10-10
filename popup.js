@@ -61,6 +61,73 @@ function renderPlaybackProgress() {
         : 0;
 }
 
+function renderSavedProgress(state) {
+    const panel = getElement('saved-progress-panel');
+    const list = getElement('saved-progress-list');
+    const items = Array.isArray(state.savedProgress) ? state.savedProgress : [];
+    const canSave = !!state.room && !!state.connected && !!state.currentPlayback;
+
+    panel.classList.toggle('hidden', !state.room && items.length === 0);
+    getElement('saved-progress-summary').textContent = items.length
+        ? `本地保存的进度（${items.length}）`
+        : '本地保存的进度';
+    getElement('save-current-progress').disabled = !canSave;
+    getElement('save-current-progress').title = canSave
+        ? '保存房间当前视频和播放进度'
+        : '加入已连接的房间并显示播放进度后即可保存';
+    getElement('saved-progress-empty').classList.toggle(
+        'hidden',
+        items.length > 0,
+    );
+    list.replaceChildren();
+
+    for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'saved-progress-item';
+
+        const details = document.createElement('div');
+        details.className = 'saved-progress-details';
+
+        const title = document.createElement('strong');
+        title.textContent = item.title || '已保存的视频';
+        title.title = item.url;
+
+        const time = document.createElement('span');
+        time.textContent = `进度 ${formatPlaybackTime(item.time)}`;
+        details.append(title, time);
+
+        const actions = document.createElement('div');
+        actions.className = 'saved-progress-actions';
+        const openButton = document.createElement('button');
+        openButton.className = 'quiet';
+        openButton.type = 'button';
+        openButton.textContent = '打开';
+        openButton.title = '在新标签页打开并定位到保存进度';
+        openButton.addEventListener('click', () => {
+            chrome.runtime.sendMessage({
+                type: 'OPEN_SAVED_PROGRESS',
+                id: item.id,
+            });
+        });
+
+        const removeButton = document.createElement('button');
+        removeButton.className = 'quiet';
+        removeButton.type = 'button';
+        removeButton.textContent = '删除';
+        removeButton.title = '删除这条本地记录';
+        removeButton.addEventListener('click', () => {
+            chrome.runtime.sendMessage({
+                type: 'DELETE_SAVED_PROGRESS',
+                id: item.id,
+            });
+        });
+
+        actions.append(openButton, removeButton);
+        row.append(details, actions);
+        list.append(row);
+    }
+}
+
 async function openRoomVideoInCurrentTab() {
     const videoUrl = safeHistoryUrl(
         lastRenderedState?.sharedNavigation?.url || currentPlayback?.url,
@@ -539,6 +606,7 @@ function render(state) {
     lastRenderedState = state;
     currentPlayback = state.currentPlayback || null;
     renderPlaybackProgress();
+    renderSavedProgress(state);
     syncRecommendationButtonVisibility(state);
 
     if (state.server) {
@@ -697,6 +765,7 @@ chrome.storage.local.get(
         'sharedNavigation',
         'followResponses',
         'currentPlayback',
+        'savedProgress',
         'memberInjectionStatus',
         'memberNames',
     ],
@@ -709,6 +778,10 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Advance the displayed clock while the popup is open between room updates.
 setInterval(renderPlaybackProgress, 1000);
+
+getElement('save-current-progress').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'SAVE_CURRENT_PROGRESS' });
+});
 setInterval(() => {
     if (lastRenderedState?.role === 'host') {
         renderInjectionDebug(lastRenderedState);

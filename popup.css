@@ -343,6 +343,61 @@ button:hover {
     padding-top: 5px;
 }
 
+.saved-progress-content {
+    padding-top: 7px;
+}
+
+.saved-progress-content > #save-current-progress {
+    width: 100%;
+}
+
+.saved-progress-content > #save-current-progress:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.saved-progress-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 7px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
+.saved-progress-details {
+    min-width: 0;
+    flex: 1;
+}
+
+.saved-progress-details strong,
+.saved-progress-details span {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.saved-progress-details strong {
+    color: #dedaff;
+    font-size: 11px;
+}
+
+.saved-progress-details span {
+    margin-top: 2px;
+    color: #aab1c2;
+    font-size: 10px;
+}
+
+.saved-progress-actions {
+    display: flex;
+    flex: none;
+}
+
+.saved-progress-actions button {
+    padding: 5px;
+    font-size: 10px;
+}
+
 .self-injection-control {
     margin-top: 11px;
 }

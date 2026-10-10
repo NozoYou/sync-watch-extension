@@ -17,6 +17,7 @@
     let lastInjectionSignature = '';
     let lastInjectionReportAt = 0;
     let role = '';
+    let waitingForRoomPlayback = false;
     let autoPauseTimer = null;
     let lastAutoPauseId = '';
     let tabMarkerEnabled = false;
@@ -133,6 +134,9 @@
     }
 
     function sendVideo(currentVideo, action, snapshot = false) {
+        // Ignore browser-restored playback/seek events until the host's first
+        // state has replaced the page's local watch-history position.
+        if (waitingForRoomPlayback) return;
         if (isExpectedMediaEvent(currentVideo, action)) return;
 
         const now = Date.now();
@@ -326,6 +330,7 @@
         const currentVideo = chooseVideo();
         if (!remoteState || !currentVideo) return;
 
+        waitingForRoomPlayback = false;
         bind(currentVideo);
 
         // Estimate the current playback point using the sender's timestamp.
@@ -363,6 +368,56 @@
         } else if (shouldResume && currentVideo.paused) {
             expectMediaEvent(currentVideo, 'paused', false);
             await currentVideo.play().catch(() => {});
+        }
+    }
+
+    function applySavedProgress(message) {
+        const requestedUrl = safePageUrl(message.url);
+        const currentUrl = safePageUrl(location.href);
+        if (!requestedUrl || !currentUrl) return;
+
+        // A redirect may change the path, but applying a bookmark on a different
+        // site would be surprising and could seek an unrelated player.
+        if (new URL(requestedUrl).hostname !== new URL(currentUrl).hostname) {
+            return;
+        }
+
+        const applyWhenReady = () => {
+            const currentVideo = chooseVideo();
+            if (!currentVideo || currentVideo.readyState < 1) return false;
+
+            const requestedTime = Math.max(0, Number(message.time) || 0);
+            const duration = Number(currentVideo.duration);
+            const targetTime = Number.isFinite(duration)
+                ? Math.min(requestedTime, duration)
+                : requestedTime;
+
+            bind(currentVideo);
+            currentVideo.pause();
+            currentVideo.currentTime = targetTime;
+            return true;
+        };
+
+        if (applyWhenReady()) return;
+
+        const onMetadata = () => {
+            if (applyWhenReady()) {
+                document.removeEventListener('loadedmetadata', onMetadata, true);
+            }
+        };
+        document.addEventListener('loadedmetadata', onMetadata, {
+            capture: true,
+            once: true,
+            signal: pageEventController.signal,
+        });
+    }
+
+    function safePageUrl(value) {
+        try {
+            const url = new URL(value);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch {
+            return '';
         }
     }
 
@@ -570,6 +625,7 @@
 
     function handleRuntimeMessage(message) {
         if (message.type === 'PAUSE_FOR_ROOM_INJECTION') {
+            waitingForRoomPlayback = true;
             for (const currentVideo of document.querySelectorAll('video')) {
                 if (!currentVideo.paused) {
                     expectMediaEvent(currentVideo, 'paused', true);
@@ -578,6 +634,8 @@
             }
         } else if (message.type === 'APPLY_REMOTE_VIDEO') {
             applyVideo(message.videoState);
+        } else if (message.type === 'APPLY_SAVED_PROGRESS') {
+            applySavedProgress(message);
         } else if (message.type === 'AUTO_PAUSE') {
             applyAutomaticPause(message);
         } else if (message.type === 'BUFFERING_CONTROL') {

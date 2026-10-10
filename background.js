@@ -8,9 +8,12 @@ const videoFrames = new Map();
 const injectionFrames = new Map();
 const navigationNotificationPrefix = 'sync-watch-navigation-';
 const recommendationNotificationPrefix = 'sync-watch-recommendation-';
+const pendingSavedProgress = new Map();
 
 // Tracks a progress-card navigation until the new page reports a healthy script.
 let roomVideoNavigation = null;
+let awaitingInitialRoomPlayback = false;
+let initialRoomSnapshotRequested = false;
 
 const state = {
     server: '',
@@ -50,6 +53,7 @@ const state = {
     bufferPause: null,
     currentVideoUrl: '',
     currentPlayback: null,
+    savedProgress: [],
     pendingNavigation: null,
     sharedNavigation: null,
     followResponses: [],
@@ -93,6 +97,7 @@ const ready = chrome.storage.local
         'bufferPause',
         'currentVideoUrl',
         'currentPlayback',
+        'savedProgress',
         'pendingNavigation',
         'sharedNavigation',
         'followResponses',
@@ -147,6 +152,7 @@ function persist() {
         bufferPause: state.bufferPause,
         currentVideoUrl: state.currentVideoUrl,
         currentPlayback: state.currentPlayback,
+        savedProgress: state.savedProgress,
         pendingNavigation: state.pendingNavigation,
         sharedNavigation: state.sharedNavigation,
         followResponses: state.followResponses,
@@ -158,6 +164,59 @@ function persist() {
 function publish() {
     persist();
     chrome.runtime.sendMessage({ type: 'STATE', state }).catch(() => {});
+}
+
+function openSavedProgressWhenReady(tabId, frameId = 0) {
+    const item = pendingSavedProgress.get(tabId);
+    if (!item) return;
+
+    const frame = injectionFrames.get(`${tabId}:${frameId}`);
+    const videoFrame = videoFrames.get(`${tabId}:${frameId}`);
+    if (!frame?.injected || !frame.videoBound || !videoFrame?.hasVideo) return;
+
+    sendTab(
+        {
+            type: 'APPLY_SAVED_PROGRESS',
+            time: item.time,
+            url: item.url,
+        },
+        frameId,
+        tabId,
+    );
+    pendingSavedProgress.delete(tabId);
+}
+
+function saveCurrentProgress() {
+    const playback = state.currentPlayback;
+    const url = safePageUrl(
+        state.sharedNavigation?.url || playback?.url || state.currentVideoUrl,
+    );
+    if (!state.room || !state.connected || !playback || !url) {
+        state.status = '房间连接并显示播放进度后，才能保存。';
+        publish();
+        return;
+    }
+
+    const receivedAt =
+        Number(playback.receivedAt) || Number(playback.at) || Date.now();
+    const time = playback.paused
+        ? Number(playback.time) || 0
+        : (Number(playback.time) || 0) +
+          Math.max(0, (Date.now() - receivedAt) / 1000) *
+              (Number(playback.rate) || 1);
+    const item = {
+        id: crypto.randomUUID(),
+        title:
+            playback.title || state.sharedNavigation?.title || '当前视频',
+        url,
+        time: Math.max(0, time),
+        duration: Number(playback.duration) || 0,
+        savedAt: Date.now(),
+    };
+
+    state.savedProgress = [item, ...(state.savedProgress || [])].slice(0, 15);
+    state.status = `已在本机保存「${item.title}」的播放进度。`;
+    publish();
 }
 
 function setStatus(status) {
@@ -320,6 +379,22 @@ function pauseRoomVideoTab(tabId) {
         .catch(() => {});
 }
 
+function beginInitialRoomPlaybackSync(frameId = state.videoFrameId) {
+    awaitingInitialRoomPlayback = true;
+    initialRoomSnapshotRequested = false;
+    state.videoReady = false;
+    sendTab({ type: 'PAUSE_FOR_ROOM_INJECTION' }, frameId);
+}
+
+function requestInitialRoomPlaybackSnapshot() {
+    if (initialRoomSnapshotRequested || !state.sharedNavigation?.id) return false;
+
+    initialRoomSnapshotRequested = sendRoomEvent('snapshot-request', {
+        navigationId: state.sharedNavigation.id,
+    });
+    return initialRoomSnapshotRequested;
+}
+
 function finishRoomVideoInjection(tabId) {
     if (
         !roomVideoNavigation ||
@@ -335,52 +410,67 @@ function finishRoomVideoInjection(tabId) {
     const frame = bestVideoFrame(tabId);
     if (frame?.hasVideo) {
         state.videoFrameId = frame.frameId;
-        state.videoReady = true;
-        sendRoomTabState(frame.frameId);
+        state.videoReady = false;
+        sendTab(
+            { type: 'PAUSE_FOR_ROOM_INJECTION' },
+            frame.frameId,
+            tabId,
+        );
         if (!roomVideoNavigation.snapshotRequested) {
-            sendRoomEvent('snapshot-request', {
-                navigationId: state.sharedNavigation?.id || '',
-            });
-            roomVideoNavigation.snapshotRequested = true;
+            roomVideoNavigation.snapshotRequested =
+                requestInitialRoomPlaybackSnapshot();
         }
-        roomVideoNavigation = null;
-        state.status = '页面注入成功，正在跟随房间播放进度。';
+        state.status = '页面注入成功，正在等候房间播放状态后同步。';
     } else {
         state.videoReady = false;
         state.status = '页面注入成功，正在等待视频播放器就绪。';
     }
 
-    sendRoomEvent('follow-response', {
-        navigationId: state.sharedNavigation?.id || '',
-        status: 'following',
-    });
     publish();
 }
 
 async function openRoomVideo(url, requestedTabId) {
     if (!state.room) return;
+    if (!Number.isInteger(requestedTabId)) return;
 
     const safeUrl = safePageUrl(url);
     if (!safeUrl) return;
 
-    const tab = await chrome.tabs.get(requestedTabId).catch(() => null);
-    if (!tab) return;
-
     // The host owns the source tab and does not need to wait for a remote sync.
     if (state.role === 'host') {
-        await chrome.tabs.update(tab.id, { url: safeUrl }).catch(() => null);
+        await chrome.tabs
+            .update(requestedTabId, { url: safeUrl })
+            .catch(() => null);
+        return;
+    }
+
+    // Close the outbound-control gate before awaiting tab lookup. Otherwise an
+    // old page can send its local watch-history seek during that async gap.
+    roomVideoNavigation = {
+        tabId: requestedTabId,
+        url: safeUrl,
+        injectionConfirmed: false,
+    };
+    beginInitialRoomPlaybackSync();
+    state.followingHost = false;
+    state.status = '正在打开房间视频；页面注入确认前会保持暂停。';
+    sendRoomEvent('follow-response', {
+        navigationId: state.sharedNavigation?.id || '',
+        status: 'pending',
+    });
+    publish();
+
+    const tab = await chrome.tabs.get(requestedTabId).catch(() => null);
+    if (!tab) {
+        roomVideoNavigation = null;
+        state.status = '找不到要打开的视频标签页，请重新点击房间进度条。';
+        publish();
         return;
     }
 
     switchRoomTab(tab.id);
-    roomVideoNavigation = {
-        tabId: tab.id,
-        url: safeUrl,
-        injectionConfirmed: false,
-    };
-    state.videoReady = false;
+    roomVideoNavigation.tabId = tab.id;
     state.videoFrameId = 0;
-    state.followingHost = false;
 
     for (const [key, frame] of videoFrames) {
         if (frame.tabId === tab.id) videoFrames.delete(key);
@@ -389,9 +479,6 @@ async function openRoomVideo(url, requestedTabId) {
         if (frame.tabId === tab.id) injectionFrames.delete(key);
     }
 
-    state.status = '正在打开房间视频；页面注入确认前会保持暂停。';
-    publish();
-
     // Stop a currently playing video before navigation and again as the new
     // page loads. The new page will only follow after its script reports in.
     pauseRoomVideoTab(tab.id);
@@ -399,9 +486,10 @@ async function openRoomVideo(url, requestedTabId) {
 }
 
 function sendRoomEvent(event, payload) {
-    if (socket?.readyState !== WebSocket.OPEN) return;
+    if (socket?.readyState !== WebSocket.OPEN) return false;
 
     socket.send(JSON.stringify({ type: 'room-event', event, payload }));
+    return true;
 }
 
 function publishInjectionStatus() {
@@ -917,12 +1005,11 @@ async function connectRoom() {
 
                 if (state.currentVideoUrl === message.sharedNavigation.url) {
                     state.followingHost = true;
-                    sendRoomEvent('snapshot-request', {
-                        navigationId: message.sharedNavigation.id,
-                    });
+                    beginInitialRoomPlaybackSync();
+                    requestInitialRoomPlaybackSnapshot();
                     sendRoomEvent('follow-response', {
                         navigationId: message.sharedNavigation.id,
-                        status: 'following',
+                        status: 'pending',
                     });
                 } else if (getMemberSettings(state.clientId).autoFollow) {
                     state.pendingNavigation = message.sharedNavigation;
@@ -1303,7 +1390,7 @@ function handleRoomEvent(message) {
         const isOlderSnapshot =
             message.event === 'snapshot' &&
             message.from === state.currentPlayback?.sourceClientId &&
-            incomingAt <= currentAt;
+            incomingAt < currentAt;
 
         // A delayed snapshot must not overwrite a newer play or pause action.
         if (isOlderSnapshot) return;
@@ -1319,6 +1406,38 @@ function handleRoomEvent(message) {
             if (!canSendPlaybackAction(memberSettings, message.payload?.action)) {
                 return;
             }
+        }
+
+        // A just-opened page must not publish its restored local position.
+        // Only the host's first room state releases that guard.
+        const localRoomFrame = bestVideoFrame(state.tabId);
+        const isExpectedRoomVideoReady = roomVideoNavigation
+            ? roomVideoNavigation.injectionConfirmed &&
+              roomVideoNavigation.snapshotRequested &&
+              isExpectedRoomVideoPage(
+                  roomVideoNavigation.tabId,
+                  localRoomFrame?.pageUrl,
+              )
+            : normalizedPageUrl(localRoomFrame?.pageUrl) ===
+              normalizedPageUrl(state.sharedNavigation?.url);
+
+        if (
+            state.role !== 'host' &&
+            awaitingInitialRoomPlayback &&
+            state.followingHost === true &&
+            message.from === state.hostClientId &&
+            localRoomFrame?.hasVideo &&
+            isExpectedRoomVideoReady
+        ) {
+            state.videoReady = true;
+            awaitingInitialRoomPlayback = false;
+            initialRoomSnapshotRequested = false;
+            roomVideoNavigation = null;
+            state.status = '页面已与房间播放状态同步。';
+            sendRoomEvent('follow-response', {
+                navigationId: state.sharedNavigation?.id || '',
+                status: 'following',
+            });
         }
 
         // Reflect the latest accepted room action in every member's popup.
@@ -1365,7 +1484,7 @@ function notifyRecommendation(recommendation) {
 }
 
 async function chooseNavigation(shouldFollow, navigation) {
-    const responseStatus = shouldFollow ? 'following' : 'not-following';
+    const responseStatus = shouldFollow ? 'pending' : 'not-following';
 
     clearNavigationNotification(navigation.id);
     state.pendingNavigation = null;
@@ -1383,7 +1502,7 @@ async function chooseNavigation(shouldFollow, navigation) {
 
     if (shouldFollow) {
         state.currentVideoUrl = navigation.url;
-        state.videoReady = false;
+        beginInitialRoomPlaybackSync();
 
         let tabExists = false;
         if (state.tabId !== null) {
@@ -1512,6 +1631,41 @@ async function inspectActiveTab(tabId) {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
     ready.then(async () => {
+        if (message.type === 'SAVE_CURRENT_PROGRESS') {
+            saveCurrentProgress();
+            return;
+        }
+
+        if (message.type === 'DELETE_SAVED_PROGRESS') {
+            state.savedProgress = (state.savedProgress || []).filter(
+                (item) => item.id !== message.id,
+            );
+            publish();
+            return;
+        }
+
+        if (message.type === 'OPEN_SAVED_PROGRESS') {
+            const item = (state.savedProgress || []).find(
+                (saved) => saved.id === message.id,
+            );
+            const url = safePageUrl(item?.url);
+            if (!item || !url) return;
+
+            chrome.tabs.create({ url }, (tab) => {
+                if (chrome.runtime.lastError || tab?.id === undefined) return;
+                pendingSavedProgress.set(tab.id, item);
+
+                // The initial page reports may arrive before tabs.create calls
+                // back, so check any frame data already received for this tab.
+                for (const frame of videoFrames.values()) {
+                    if (frame.tabId === tab.id) {
+                        openSavedProgressWhenReady(tab.id, frame.frameId);
+                    }
+                }
+            });
+            return;
+        }
+
         if (message.type === 'REFRESH_MY_INJECTION') {
             if (state.room && state.clientId) {
                 await handleReinjectionRequest(state.clientId);
@@ -1556,6 +1710,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 site: String(status.site || '').slice(0, 120),
                 reportedAt: Date.now(),
             });
+            openSavedProgressWhenReady(tabId, frameId);
 
             if (
                 status.injected === true &&
@@ -1583,6 +1738,16 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             };
 
             videoFrames.set(key, candidate);
+            openSavedProgressWhenReady(tabId, frameId);
+
+            if (state.role !== 'host' && awaitingInitialRoomPlayback) {
+                sendTab(
+                    { type: 'PAUSE_FOR_ROOM_INJECTION' },
+                    frameId,
+                    tabId,
+                );
+                state.videoReady = false;
+            }
 
             if (isExpectedRoomVideoPage(tabId, candidate.pageUrl)) {
                 if (roomVideoNavigation.injectionConfirmed) {
@@ -1632,12 +1797,22 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     state.pendingNavigation === null
                 ) {
                     state.currentVideoUrl = selected.pageUrl;
-                    state.videoReady = true;
+                    if (awaitingInitialRoomPlayback) {
+                        state.videoReady = false;
+                        if (
+                            normalizedPageUrl(selected.pageUrl) ===
+                            normalizedPageUrl(state.sharedNavigation?.url)
+                        ) {
+                            requestInitialRoomPlaybackSnapshot();
+                        }
+                    } else {
+                        state.videoReady = true;
 
-                    if (!wasReady && state.sharedNavigation) {
-                        sendRoomEvent('snapshot-request', {
-                            navigationId: state.sharedNavigation.id,
-                        });
+                        if (!wasReady && state.sharedNavigation) {
+                            sendRoomEvent('snapshot-request', {
+                                navigationId: state.sharedNavigation.id,
+                            });
+                        }
                     }
                 }
 
@@ -1668,6 +1843,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 !state.room ||
                 !state.connected ||
                 (state.role !== 'host' && state.followingHost !== true) ||
+                (state.role !== 'host' && !state.videoReady) ||
                 (state.role === 'host' && !state.videoReady)
             ) {
                 return;
@@ -2133,6 +2309,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (message.type === 'CREATE_ROOM') {
+            roomVideoNavigation = null;
+            awaitingInitialRoomPlayback = false;
+            initialRoomSnapshotRequested = false;
             state.server = message.server || state.server;
             state.room = Math.random().toString(36).slice(2, 8).toUpperCase();
             state.role = 'host';
@@ -2190,6 +2369,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (message.type === 'JOIN_ROOM') {
+            roomVideoNavigation = null;
+            awaitingInitialRoomPlayback = false;
+            initialRoomSnapshotRequested = false;
             const roomCode = (message.room || '')
                 .toUpperCase()
                 .replace(/[^A-Z0-9]/g, '')
@@ -2241,6 +2423,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (message.type === 'LEAVE') {
+            roomVideoNavigation = null;
+            awaitingInitialRoomPlayback = false;
+            initialRoomSnapshotRequested = false;
             setTabMarker(state.tabId, false);
             disconnectSocket();
             sendTab({ type: 'ROOM_STOP' });
@@ -2318,9 +2503,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Remove stale frame metadata and clear the active video when its tab closes.
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (roomVideoNavigation?.tabId === tabId) roomVideoNavigation = null;
+    pendingSavedProgress.delete(tabId);
 
     for (const [key, frame] of videoFrames) {
         if (frame.tabId === tabId) videoFrames.delete(key);
+    }
+    for (const [key, frame] of injectionFrames) {
+        if (frame.tabId === tabId) injectionFrames.delete(key);
     }
 
     if (state.tabId === tabId) {
