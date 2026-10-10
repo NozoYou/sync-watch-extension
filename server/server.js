@@ -11,7 +11,6 @@ function defaultMemberSettings() {
         canControlPlayback: true,
         canSeek: true,
         autoFollow: true,
-        canManageAutoFollow: true,
         canManageAutoPause: false,
         autoPauseEnabled: false,
         canManagePauseOnBuffer: false,
@@ -475,23 +474,12 @@ webSocketServer.on('connection', (webSocket) => {
                     ? [
                           'canControlPlayback',
                           'canSeek',
-                          'autoFollow',
-                          'canManageAutoFollow',
                           'canManageAutoPause',
                           'autoPauseEnabled',
                           'canManagePauseOnBuffer',
                           'pauseOnBufferEnabled',
                       ]
-                    : [
-                          'autoFollow',
-                          'autoPauseEnabled',
-                          'pauseOnBufferEnabled',
-                      ].filter(
-                          (key) =>
-                              key !== 'autoFollow' ||
-                              room.memberSettings.get(targetClientId)
-                                  ?.canManageAutoFollow === true,
-                      );
+                    : ['autoPauseEnabled', 'pauseOnBufferEnabled'];
                 const updates = {};
 
                 for (const key of allowedSettings) {

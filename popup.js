@@ -99,16 +99,12 @@ function renderHostMemberSettings(state) {
         const settings = {
             canControlPlayback: true,
             canSeek: true,
-            autoFollow: true,
             canManageAutoPause: false,
             autoPauseEnabled: false,
             canManagePauseOnBuffer: false,
             pauseOnBufferEnabled: false,
             ...(state.memberSettings?.[clientId] || {}),
         };
-        if (typeof state.memberSettings?.[clientId]?.autoFollow !== 'boolean') {
-            settings.autoFollow = true;
-        }
         const card = document.createElement('div');
         card.className = 'member-setting-card';
 
@@ -122,7 +118,6 @@ function renderHostMemberSettings(state) {
         const fields = [
             ['canControlPlayback', '播放 / 暂停'],
             ['canSeek', '进度条跳转'],
-            ['canManageAutoFollow', '允许成员自选跟随提示'],
             ['canManageAutoPause', '允许成员自选新视频就绪暂停'],
             ['canManagePauseOnBuffer', '允许成员自选卡顿触发暂停'],
         ];
@@ -420,17 +415,15 @@ function render(state) {
         renderRoomMemberList(state);
 
         const isGuest = state.role !== 'host';
-        getElement('auto-follow-control').classList.toggle('hidden', !isGuest);
-        const ownFollowPromptEnabled =
+        getElement('member-follow-settings').classList.remove('hidden');
+        getElement('auto-follow').checked =
             typeof state.memberSettings?.[state.clientId]?.autoFollow === 'boolean'
                 ? state.memberSettings[state.clientId].autoFollow
                 : true;
-        getElement('auto-follow').checked = ownFollowPromptEnabled;
-        getElement('auto-follow').disabled =
-            !state.connected ||
-            (state.role !== 'host' &&
-                state.memberSettings?.[state.clientId]?.canManageAutoFollow !==
-                    true);
+        getElement('auto-follow').disabled = !state.connected;
+        getElement('follow-prompt-enabled').checked =
+            state.followPromptEnabled !== false;
+        getElement('follow-prompt-enabled').disabled = !state.connected;
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = false;
         renderHostMemberSettings(state);
@@ -524,7 +517,7 @@ function render(state) {
         getElement('room-box').classList.add('hidden');
         getElement('room-member-list').replaceChildren();
         getElement('room-playback').classList.add('hidden');
-        getElement('auto-follow-control').classList.add('hidden');
+        getElement('member-follow-settings').classList.add('hidden');
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = true;
         getElement('host-member-settings').classList.add('hidden');
@@ -563,6 +556,7 @@ chrome.storage.local.get(
         'modifyTabIcon',
         'autoReinjectSamePage',
         'hasSeenFollowPrompt',
+        'followPromptEnabled',
         'role',
         'clientId',
         'hostClientId',
@@ -617,6 +611,13 @@ getElement('auto-follow').addEventListener('change', () => {
     chrome.runtime.sendMessage({
         type: 'SET_AUTO_FOLLOW',
         enabled: getElement('auto-follow').checked,
+    });
+});
+
+getElement('follow-prompt-enabled').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_FOLLOW_PROMPT_ENABLED',
+        enabled: getElement('follow-prompt-enabled').checked,
     });
 });
 
@@ -760,8 +761,6 @@ getElement('apply-member-settings-all').addEventListener('click', () => {
     const keys = [
         'canControlPlayback',
         'canSeek',
-        'autoFollow',
-        'canManageAutoFollow',
         'canManageAutoPause',
         'canManagePauseOnBuffer',
     ];

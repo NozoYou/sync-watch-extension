@@ -534,25 +534,15 @@
                     document.createTextNode('保持开启此提示（之后可在设置中重新开启）'),
                 );
                 root.append(preference);
-
-                checkbox.addEventListener('change', () => {
-                    chrome.runtime.sendMessage({
-                        type: 'FOLLOW_PROMPT_PREFERENCE',
-                        keepEnabled: checkbox.checked,
-                    });
-                });
-
-                root.addEventListener('click', (event) => {
-                    if (event.target.closest('button') && !checkbox.checked) {
-                        chrome.runtime.sendMessage({
-                            type: 'FOLLOW_PROMPT_PREFERENCE',
-                            keepEnabled: false,
-                        });
-                    }
-                });
             }
 
             addButton('不跟随', false, () => {
+                if (data.askPreference) {
+                    chrome.runtime.sendMessage({
+                        type: 'FOLLOW_PROMPT_PREFERENCE',
+                        keepEnabled: root.querySelector('input[type="checkbox"]')?.checked !== false,
+                    });
+                }
                 chrome.runtime.sendMessage({
                     type: 'FOLLOW_DECISION',
                     follow: false,
@@ -560,6 +550,12 @@
                 root.remove();
             });
             addButton('跟随跳转', true, () => {
+                if (data.askPreference) {
+                    chrome.runtime.sendMessage({
+                        type: 'FOLLOW_PROMPT_PREFERENCE',
+                        keepEnabled: root.querySelector('input[type="checkbox"]')?.checked !== false,
+                    });
+                }
                 chrome.runtime.sendMessage({
                     type: 'FOLLOW_DECISION',
                     follow: true,

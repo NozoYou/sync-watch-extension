@@ -49,6 +49,7 @@
                     保存
                 </button>
             </div>
+            <p class="small">保存后会同步给房间内所有人。</p>
         </section>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
@@ -74,16 +75,8 @@
             </details>
 
             <details id="playback-settings" class="feature-menu">
-                <summary>播放与跟随设置</summary>
+                <summary>播放与标签页设置</summary>
                 <div class="feature-menu-content">
-                    <div id="auto-follow-control" class="auto-follow-control hidden">
-                        <label class="setting-checkbox" for="auto-follow">
-                            <input id="auto-follow" type="checkbox" />
-                            <span>收到新视频时弹出跟随提示</span>
-                        </label>
-                        <p class="small">关闭后页面不再弹出提示；仍可在扩展中手动跟随。</p>
-                    </div>
-
                     <section id="auto-pause-panel" class="auto-pause-panel">
                         <label class="setting-checkbox" for="auto-pause">
                             <input id="auto-pause" type="checkbox" />
@@ -173,6 +166,17 @@
 
         <!-- Room status and navigation choices are shown while in a room. -->
         <section id="room-box" class="room hidden">
+            <section id="member-follow-settings" class="member-follow-settings hidden">
+                <label class="setting-checkbox" for="auto-follow">
+                    <input id="auto-follow" type="checkbox" />
+                    自动跟随房主分享的新视频
+                </label>
+                <label class="setting-checkbox" for="follow-prompt-enabled">
+                    <input id="follow-prompt-enabled" type="checkbox" />
+                    显示“房主分享了新视频，是否跟随？”弹窗
+                </label>
+            </section>
+
             <div class="room-top">
                 <span>房间码</span>
                 <strong id="room-code"></strong>

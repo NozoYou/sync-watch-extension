@@ -29,6 +29,7 @@ const state = {
     hostClientId: '',
     displayName: '',
     hasSeenFollowPrompt: false,
+    followPromptEnabled: true,
     members: [],
     memberNames: {},
     memberSettings: {},
@@ -68,6 +69,7 @@ const ready = chrome.storage.local
         'hostClientId',
         'displayName',
         'hasSeenFollowPrompt',
+        'followPromptEnabled',
         'members',
         'memberNames',
         'memberSettings',
@@ -119,6 +121,7 @@ function persist() {
         hostClientId: state.hostClientId,
         displayName: state.displayName,
         hasSeenFollowPrompt: state.hasSeenFollowPrompt,
+        followPromptEnabled: state.followPromptEnabled,
         members: state.members,
         memberNames: state.memberNames,
         memberSettings: state.memberSettings,
@@ -156,7 +159,6 @@ function defaultMemberSettings() {
         canControlPlayback: true,
         canSeek: true,
         autoFollow: true,
-        canManageAutoFollow: true,
         canManageAutoPause: false,
         autoPauseEnabled: false,
         canManagePauseOnBuffer: false,
@@ -582,13 +584,18 @@ function disconnectSocket() {
 }
 
 function notifyNavigationIfEnabled(navigation) {
-    // The switch is local to each participant and controls only the page prompt.
-    if (getMemberSettings(state.clientId).autoFollow) {
-        showNavigationPrompt(navigation);
+    if (state.followPromptEnabled) {
+        // Ask once whether to keep showing this reminder; enabled remains the default.
+        if (state.hasSeenFollowPrompt) {
+            showNavigationPrompt(navigation);
+        } else {
+            state.hasSeenFollowPrompt = true;
+            showNavigationPrompt(navigation, true);
+            persist();
+        }
         return;
     }
 
-    // Ask once before honoring the default-on switch for the first time.
     if (!state.hasSeenFollowPrompt) {
         state.hasSeenFollowPrompt = true;
         showNavigationPrompt(navigation, true);
@@ -990,7 +997,7 @@ function handleRoomEvent(message) {
         const isHostUpdate = message.from === state.hostClientId;
         const isOwnMemberPreferenceUpdate =
             message.from === targetClientId &&
-            (targetClientId === state.clientId || state.role === 'host');
+            targetClientId === state.clientId;
 
         // The host manages permissions; a member can edit only delegated preferences.
         if (!targetClientId || (!isHostUpdate && !isOwnMemberPreferenceUpdate)) return;
@@ -1000,22 +1007,12 @@ function handleRoomEvent(message) {
             ? [
                   'canControlPlayback',
                   'canSeek',
-                  'autoFollow',
-                  'canManageAutoFollow',
-                  'canManageAutoPause',
-                  'autoPauseEnabled',
+                'canManageAutoPause',
+                'autoPauseEnabled',
                   'canManagePauseOnBuffer',
                   'pauseOnBufferEnabled',
               ]
-        : [
-              'autoFollow',
-              'autoPauseEnabled',
-              'pauseOnBufferEnabled',
-          ].filter(
-              (key) =>
-                  key !== 'autoFollow' ||
-                  currentSettings.canManageAutoFollow === true,
-          );
+            : ['autoFollow', 'autoPauseEnabled', 'pauseOnBufferEnabled'];
         for (const key of allowedKeys) {
             if (typeof updates[key] === 'boolean') {
                 currentSettings[key] = updates[key];
@@ -1578,40 +1575,30 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (message.type === 'FOLLOW_PROMPT_PREFERENCE') {
-            if (message.keepEnabled === false) {
-                const settings = getMemberSettings(state.clientId);
-                settings.autoFollow = false;
-                sendRoomEvent('member-settings', {
-                    targetClientId: state.clientId,
-                    settings: { autoFollow: false },
-                });
-                publish();
+            state.hasSeenFollowPrompt = true;
+            state.followPromptEnabled = message.keepEnabled !== false;
+            publish();
+            return;
+        }
+
+        if (message.type === 'SET_FOLLOW_PROMPT_ENABLED') {
+            state.followPromptEnabled = !!message.enabled;
+            state.hasSeenFollowPrompt = true;
+            publish();
+            if (state.followPromptEnabled && state.pendingNavigation) {
+                showNavigationPrompt(state.pendingNavigation);
             }
             return;
         }
 
-        if (
-            message.type === 'SET_AUTO_FOLLOW' &&
-            state.role !== 'host' &&
-            state.connected &&
-            state.clientId
-        ) {
+        if (message.type === 'SET_AUTO_FOLLOW' && state.clientId) {
             const settings = getMemberSettings(state.clientId);
             settings.autoFollow = !!message.enabled;
-            state.hasSeenFollowPrompt = true;
-
             publish();
 
-            if (!settings.autoFollow && state.pendingNavigation) {
-                clearNavigationNotification(state.pendingNavigation.id);
-            } else if (settings.autoFollow && state.pendingNavigation) {
-                showNavigationPrompt(state.pendingNavigation);
+            if (settings.autoFollow && state.pendingNavigation) {
+                void chooseNavigation(true, state.pendingNavigation);
             }
-
-            sendRoomEvent('member-settings', {
-                targetClientId: state.clientId,
-                settings: { autoFollow: settings.autoFollow },
-            });
             return;
         }
 
@@ -1624,8 +1611,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const allowedKeys = [
                 'canControlPlayback',
                 'canSeek',
-                'autoFollow',
-                'canManageAutoFollow',
                 'canManageAutoPause',
                 'canManagePauseOnBuffer',
             ];
@@ -1694,8 +1679,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const allowedKeys = [
                 'canControlPlayback',
                 'canSeek',
-                'autoFollow',
-                'canManageAutoFollow',
                 'canManageAutoPause',
                 'canManagePauseOnBuffer',
             ];
@@ -1888,6 +1871,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.hasSeenFollowPrompt = false;
+            state.followPromptEnabled = true;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
@@ -1951,6 +1935,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberInjectionStatus = {};
             state.memberSettings = {};
             state.hasSeenFollowPrompt = false;
+            state.followPromptEnabled = true;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;

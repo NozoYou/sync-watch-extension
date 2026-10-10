@@ -220,6 +220,15 @@ button:hover {
     font-size: 11px;
 }
 
+.member-follow-settings {
+    display: grid;
+    gap: 7px;
+    margin: 8px 0;
+    padding: 8px;
+    border-radius: 7px;
+    background: #22243a;
+}
+
 .room-member-list {
     display: flex;
     flex-wrap: wrap;
@@ -278,7 +287,6 @@ button:hover {
 }
 
 /* Per-member playback permissions and automatic navigation following. */
-.auto-follow-control,
 .tab-marker-control,
 .host-member-settings,
 .self-injection-control,
