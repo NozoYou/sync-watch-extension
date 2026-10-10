@@ -522,6 +522,36 @@
                 root.remove();
             });
         } else {
+            if (data.askPreference) {
+                const preference = document.createElement('label');
+                preference.style.cssText =
+                    'display:flex;align-items:center;gap:7px;margin:0 auto 10px;color:#b8bfd1;font-size:12px';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.style.cssText = 'accent-color:#8777ff';
+                preference.append(
+                    checkbox,
+                    document.createTextNode('保持开启此提示（之后可在设置中重新开启）'),
+                );
+                root.append(preference);
+
+                checkbox.addEventListener('change', () => {
+                    chrome.runtime.sendMessage({
+                        type: 'FOLLOW_PROMPT_PREFERENCE',
+                        keepEnabled: checkbox.checked,
+                    });
+                });
+
+                root.addEventListener('click', (event) => {
+                    if (event.target.closest('button') && !checkbox.checked) {
+                        chrome.runtime.sendMessage({
+                            type: 'FOLLOW_PROMPT_PREFERENCE',
+                            keepEnabled: false,
+                        });
+                    }
+                });
+            }
+
             addButton('不跟随', false, () => {
                 chrome.runtime.sendMessage({
                     type: 'FOLLOW_DECISION',
@@ -553,6 +583,8 @@
             updateTabMarker(message.enabled, message.modifyIcon);
         } else if (message.type === 'SHOW_HOST_PROMPT') {
             showPrompt('host', message);
+        } else if (message.type === 'SHOW_FOLLOW_PROMPT') {
+            showPrompt('member', message);
         } else if (message.type === 'HIDE_ROOM_PROMPT') {
             document.getElementById('__sync_watch_prompt')?.remove();
         } else if (message.type === 'GET_VIDEO_SNAPSHOT') {

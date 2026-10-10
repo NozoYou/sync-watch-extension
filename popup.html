@@ -36,16 +36,22 @@
             </div>
         </header>
 
-        <div id="main-menu-panel" class="main-menu-panel hidden">
-            <section class="display-name-panel">
-                <label for="display-name">房间显示名称</label>
-                <div class="display-name-row">
-                    <input id="display-name" maxlength="24" placeholder="输入大家看到的名字" autocomplete="nickname" />
-                    <button id="save-display-name" class="quiet" type="button">保存</button>
-                </div>
-                <p class="small">保存后会同步给房间内所有人。</p>
-            </section>
+        <section class="display-name-panel">
+            <label for="display-name">房间显示名称</label>
+            <div class="display-name-row">
+                <input
+                    id="display-name"
+                    maxlength="24"
+                    placeholder="输入大家看到的名字"
+                    autocomplete="nickname"
+                />
+                <button id="save-display-name" class="quiet" type="button">
+                    保存
+                </button>
+            </div>
+        </section>
 
+        <div id="main-menu-panel" class="main-menu-panel hidden">
             <!-- Server settings stay collapsed after a server address is saved. -->
             <details id="connection-settings">
                 <summary id="settings-summary">连接设置</summary>
@@ -73,8 +79,9 @@
                     <div id="auto-follow-control" class="auto-follow-control hidden">
                         <label class="setting-checkbox" for="auto-follow">
                             <input id="auto-follow" type="checkbox" />
-                            自动跟随房主分享的新视频
+                            <span>收到新视频时弹出跟随提示</span>
                         </label>
+                        <p class="small">关闭后页面不再弹出提示；仍可在扩展中手动跟随。</p>
                     </div>
 
                     <section id="auto-pause-panel" class="auto-pause-panel">

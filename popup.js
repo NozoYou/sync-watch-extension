@@ -99,13 +99,16 @@ function renderHostMemberSettings(state) {
         const settings = {
             canControlPlayback: true,
             canSeek: true,
-            autoFollow: false,
+            autoFollow: true,
             canManageAutoPause: false,
             autoPauseEnabled: false,
             canManagePauseOnBuffer: false,
             pauseOnBufferEnabled: false,
             ...(state.memberSettings?.[clientId] || {}),
         };
+        if (typeof state.memberSettings?.[clientId]?.autoFollow !== 'boolean') {
+            settings.autoFollow = true;
+        }
         const card = document.createElement('div');
         card.className = 'member-setting-card';
 
@@ -119,7 +122,7 @@ function renderHostMemberSettings(state) {
         const fields = [
             ['canControlPlayback', '播放 / 暂停'],
             ['canSeek', '进度条跳转'],
-            ['autoFollow', '自动跟随新视频'],
+            ['canManageAutoFollow', '允许成员自选跟随提示'],
             ['canManageAutoPause', '允许成员自选新视频就绪暂停'],
             ['canManagePauseOnBuffer', '允许成员自选卡顿触发暂停'],
         ];
@@ -418,9 +421,16 @@ function render(state) {
 
         const isGuest = state.role !== 'host';
         getElement('auto-follow-control').classList.toggle('hidden', !isGuest);
-        getElement('auto-follow').checked = !!
-            state.memberSettings?.[state.clientId]?.autoFollow;
-        getElement('auto-follow').disabled = !state.connected;
+        const ownFollowPromptEnabled =
+            typeof state.memberSettings?.[state.clientId]?.autoFollow === 'boolean'
+                ? state.memberSettings[state.clientId].autoFollow
+                : true;
+        getElement('auto-follow').checked = ownFollowPromptEnabled;
+        getElement('auto-follow').disabled =
+            !state.connected ||
+            (state.role !== 'host' &&
+                state.memberSettings?.[state.clientId]?.canManageAutoFollow !==
+                    true);
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = false;
         renderHostMemberSettings(state);
@@ -552,6 +562,7 @@ chrome.storage.local.get(
         'pauseOnBufferDelay',
         'modifyTabIcon',
         'autoReinjectSamePage',
+        'hasSeenFollowPrompt',
         'role',
         'clientId',
         'hostClientId',
@@ -750,6 +761,7 @@ getElement('apply-member-settings-all').addEventListener('click', () => {
         'canControlPlayback',
         'canSeek',
         'autoFollow',
+        'canManageAutoFollow',
         'canManageAutoPause',
         'canManagePauseOnBuffer',
     ];

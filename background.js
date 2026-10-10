@@ -28,6 +28,7 @@ const state = {
     clientId: '',
     hostClientId: '',
     displayName: '',
+    hasSeenFollowPrompt: false,
     members: [],
     memberNames: {},
     memberSettings: {},
@@ -66,6 +67,7 @@ const ready = chrome.storage.local
         'clientId',
         'hostClientId',
         'displayName',
+        'hasSeenFollowPrompt',
         'members',
         'memberNames',
         'memberSettings',
@@ -116,6 +118,7 @@ function persist() {
         clientId: state.clientId,
         hostClientId: state.hostClientId,
         displayName: state.displayName,
+        hasSeenFollowPrompt: state.hasSeenFollowPrompt,
         members: state.members,
         memberNames: state.memberNames,
         memberSettings: state.memberSettings,
@@ -152,7 +155,8 @@ function defaultMemberSettings() {
     return {
         canControlPlayback: true,
         canSeek: true,
-        autoFollow: false,
+        autoFollow: true,
+        canManageAutoFollow: true,
         canManageAutoPause: false,
         autoPauseEnabled: false,
         canManagePauseOnBuffer: false,
@@ -577,22 +581,32 @@ function disconnectSocket() {
     socket = null;
 }
 
-function notifyNavigation(navigation) {
-    if (!navigation?.id || !chrome.notifications) return;
+function notifyNavigationIfEnabled(navigation) {
+    // The switch is local to each participant and controls only the page prompt.
+    if (getMemberSettings(state.clientId).autoFollow) {
+        showNavigationPrompt(navigation);
+        return;
+    }
 
-    const notificationId = navigationNotificationPrefix + navigation.id;
+    // Ask once before honoring the default-on switch for the first time.
+    if (!state.hasSeenFollowPrompt) {
+        state.hasSeenFollowPrompt = true;
+        showNavigationPrompt(navigation, true);
+        persist();
+    }
+}
 
-    chrome.action.setBadgeBackgroundColor({ color: '#7666f4' }).catch(() => {});
-    chrome.action.setBadgeText({ text: '!' }).catch(() => {});
-    chrome.notifications
-        .create(notificationId, {
-            type: 'basic',
-            iconUrl: chrome.runtime.getURL('notification-icon.png'),
-            title: '房主分享了新视频',
-            message: String(navigation.title || '新视频').slice(0, 160),
-            priority: 0,
-        })
-        .catch(() => {});
+function showNavigationPrompt(navigation, askPreference = false) {
+    sendTab(
+        {
+            type: 'SHOW_FOLLOW_PROMPT',
+            url: navigation?.url,
+            title: navigation?.title,
+            askPreference,
+        },
+        0,
+        state.tabId,
+    );
 }
 
 function clearNavigationNotification(navigationId) {
@@ -675,6 +689,15 @@ async function connectRoom() {
             state.memberNames = { ...(message.memberNames || {}) };
             state.memberNames[state.clientId] =
                 state.memberNames[state.clientId] || state.displayName || '成员';
+            state.memberSettings[state.clientId] = {
+                ...defaultMemberSettings(),
+                ...state.memberSettings[state.clientId],
+                autoFollow:
+                    typeof state.memberSettings[state.clientId]?.autoFollow ===
+                    'boolean'
+                        ? state.memberSettings[state.clientId].autoFollow
+                        : true,
+            };
             state.memberInjectionStatus = {};
             state.memberCount = state.members.length;
             state.hostClientId =
@@ -690,6 +713,7 @@ async function connectRoom() {
                 ...locallySavedHistory,
                 ...(message.navigationHistory || []),
             ]);
+            state.hasSeenFollowPrompt = state.hasSeenFollowPrompt === true;
             state.autoPause = message.autoPause || { enabled: false, duration: 5 };
             state.pauseOnBuffer = message.pauseOnBuffer === true;
             state.pauseOnBufferDelay = [3, 5].includes(
@@ -754,7 +778,7 @@ async function connectRoom() {
                 } else {
                     state.pendingNavigation = message.sharedNavigation;
                     state.followingHost = null;
-                    notifyNavigation(message.sharedNavigation);
+                    notifyNavigationIfEnabled(message.sharedNavigation);
                 }
             } else if (state.role !== 'host') {
                 sendRoomEvent('snapshot-request', { navigationId: '' });
@@ -971,19 +995,27 @@ function handleRoomEvent(message) {
         // The host manages permissions; a member can edit only delegated preferences.
         if (!targetClientId || (!isHostUpdate && !isOwnMemberPreferenceUpdate)) return;
 
+        const currentSettings = getMemberSettings(targetClientId);
         const allowedKeys = isHostUpdate
             ? [
                   'canControlPlayback',
                   'canSeek',
                   'autoFollow',
+                  'canManageAutoFollow',
                   'canManageAutoPause',
                   'autoPauseEnabled',
                   'canManagePauseOnBuffer',
                   'pauseOnBufferEnabled',
               ]
-            : ['autoFollow', 'autoPauseEnabled', 'pauseOnBufferEnabled'];
-        const currentSettings = getMemberSettings(targetClientId);
-
+        : [
+              'autoFollow',
+              'autoPauseEnabled',
+              'pauseOnBufferEnabled',
+          ].filter(
+              (key) =>
+                  key !== 'autoFollow' ||
+                  currentSettings.canManageAutoFollow === true,
+          );
         for (const key of allowedKeys) {
             if (typeof updates[key] === 'boolean') {
                 currentSettings[key] = updates[key];
@@ -998,15 +1030,6 @@ function handleRoomEvent(message) {
         ) {
             state.autoPauseStartedNavigationId = '';
             startAutoPauseWhenReady();
-        }
-
-        if (
-            targetClientId === state.clientId &&
-            updates.autoFollow === true &&
-            state.pendingNavigation
-        ) {
-            void chooseNavigation(true, state.pendingNavigation);
-            return;
         }
 
         publish();
@@ -1049,7 +1072,7 @@ function handleRoomEvent(message) {
         state.followingHost = null;
 
         publish();
-        notifyNavigation(message.payload);
+        notifyNavigationIfEnabled(message.payload);
         return;
     }
 
@@ -1554,6 +1577,19 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (message.type === 'FOLLOW_PROMPT_PREFERENCE') {
+            if (message.keepEnabled === false) {
+                const settings = getMemberSettings(state.clientId);
+                settings.autoFollow = false;
+                sendRoomEvent('member-settings', {
+                    targetClientId: state.clientId,
+                    settings: { autoFollow: false },
+                });
+                publish();
+            }
+            return;
+        }
+
         if (
             message.type === 'SET_AUTO_FOLLOW' &&
             state.role !== 'host' &&
@@ -1562,11 +1598,14 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         ) {
             const settings = getMemberSettings(state.clientId);
             settings.autoFollow = !!message.enabled;
+            state.hasSeenFollowPrompt = true;
 
-            if (settings.autoFollow && state.pendingNavigation) {
-                void chooseNavigation(true, state.pendingNavigation);
-            } else {
-                publish();
+            publish();
+
+            if (!settings.autoFollow && state.pendingNavigation) {
+                clearNavigationNotification(state.pendingNavigation.id);
+            } else if (settings.autoFollow && state.pendingNavigation) {
+                showNavigationPrompt(state.pendingNavigation);
             }
 
             sendRoomEvent('member-settings', {
@@ -1586,6 +1625,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 'canControlPlayback',
                 'canSeek',
                 'autoFollow',
+                'canManageAutoFollow',
                 'canManageAutoPause',
                 'canManagePauseOnBuffer',
             ];
@@ -1655,6 +1695,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 'canControlPlayback',
                 'canSeek',
                 'autoFollow',
+                'canManageAutoFollow',
                 'canManageAutoPause',
                 'canManagePauseOnBuffer',
             ];
@@ -1846,6 +1887,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberNames = {};
             state.memberInjectionStatus = {};
             state.memberSettings = {};
+            state.hasSeenFollowPrompt = false;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
@@ -1908,6 +1950,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberNames = {};
             state.memberInjectionStatus = {};
             state.memberSettings = {};
+            state.hasSeenFollowPrompt = false;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseOnBuffer = false;
