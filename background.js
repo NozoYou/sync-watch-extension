@@ -142,6 +142,10 @@ function defaultMemberSettings() {
         canControlPlayback: true,
         canSeek: true,
         autoFollow: false,
+        canManageAutoPause: false,
+        autoPauseEnabled: false,
+        canManagePauseOnBuffer: false,
+        pauseOnBufferEnabled: false,
     };
 }
 
@@ -151,6 +155,47 @@ function getMemberSettings(clientId) {
     }
 
     return state.memberSettings[clientId];
+}
+
+function isAutoPauseEnabledForMember(clientId) {
+    if (clientId === state.clientId) return !!state.autoPause.enabled;
+
+    const settings = getMemberSettings(clientId);
+    return settings.canManageAutoPause
+        ? settings.autoPauseEnabled
+        : !!state.autoPause.enabled;
+}
+
+function isBufferPauseEnabledForMember(clientId) {
+    if (clientId === state.clientId) return !!state.pauseOnBuffer;
+
+    const settings = getMemberSettings(clientId);
+    return settings.canManagePauseOnBuffer
+        ? settings.pauseOnBufferEnabled
+        : !!state.pauseOnBuffer;
+}
+
+function sendBufferingSettings() {
+    sendTab(
+        {
+            type: 'BUFFERING_SETTINGS',
+            delay: state.pauseOnBufferDelay,
+            enabled: isBufferPauseEnabledForMember(state.clientId),
+        },
+        state.videoFrameId,
+    );
+}
+
+function sendRoomTabState(frameId = state.videoFrameId) {
+    sendTab(
+        {
+            type: 'ROOM_CONNECTED',
+            role: state.role,
+            bufferingDelay: state.pauseOnBufferDelay,
+            bufferingEnabled: isBufferPauseEnabledForMember(state.clientId),
+        },
+        frameId,
+    );
 }
 
 function canSendPlaybackAction(settings, action) {
@@ -350,19 +395,33 @@ function announceNavigationReady() {
 function startAutoPauseWhenReady() {
     if (
         state.role !== 'host' ||
-        !state.autoPause.enabled ||
         !state.sharedNavigation?.id ||
-        !state.autoPauseReady.includes(state.clientId) ||
         state.autoPauseStartedNavigationId === state.sharedNavigation.id
     ) {
         return;
     }
 
-    const followingMembers = state.followResponses
-        .filter((response) => response.status === 'following')
-        .map((response) => response.clientId);
+    const targetClientIds = [];
 
-    if (followingMembers.some((clientId) => !state.autoPauseReady.includes(clientId))) {
+    if (isAutoPauseEnabledForMember(state.clientId)) {
+        targetClientIds.push(state.clientId);
+    }
+
+    for (const response of state.followResponses) {
+        if (
+            response.status === 'following' &&
+            isAutoPauseEnabledForMember(response.clientId)
+        ) {
+            targetClientIds.push(response.clientId);
+        }
+    }
+
+    if (
+        !targetClientIds.length ||
+        targetClientIds.some(
+            (clientId) => !state.autoPauseReady.includes(clientId),
+        )
+    ) {
         return;
     }
 
@@ -375,18 +434,20 @@ function startAutoPauseWhenReady() {
         pauseId: crypto.randomUUID(),
         url: state.sharedNavigation.url,
         resumeAt,
+        targetClientIds,
     };
 
     state.autoPauseStartedNavigationId = state.sharedNavigation.id;
     publish();
-    sendTab({ type: 'AUTO_PAUSE', ...payload }, state.videoFrameId);
+    if (targetClientIds.includes(state.clientId)) {
+        sendTab({ type: 'AUTO_PAUSE', ...payload }, state.videoFrameId);
+    }
     sendRoomEvent('auto-pause-start', payload);
 }
 
 function startBufferingPause() {
     if (
         state.role !== 'host' ||
-        !state.pauseOnBuffer ||
         !state.bufferingMembers.length ||
         !state.sharedNavigation?.id ||
         state.bufferPause
@@ -623,11 +684,7 @@ async function connectRoom() {
             setStatus('房间连接已建立。');
 
             if (state.tabId !== null) {
-                sendTab({
-                    type: 'ROOM_CONNECTED',
-                    role: state.role,
-                    bufferingDelay: state.pauseOnBufferDelay,
-                });
+                sendRoomTabState();
                 setTabMarker(state.tabId, true);
             }
 
@@ -782,16 +839,9 @@ function handleRoomEvent(message) {
         )
             ? message.payload.pauseOnBufferDelay
             : 5;
-        sendTab(
-            {
-                type: 'BUFFERING_SETTINGS',
-                delay: state.pauseOnBufferDelay,
-            },
-            state.videoFrameId,
-        );
-        if (!state.pauseOnBuffer) {
-            state.bufferingMembers = [];
-            finishBufferingPause();
+        sendBufferingSettings();
+        if (state.role === 'host' && !state.pauseOnBuffer) {
+            updateBufferingMember(state.clientId, false);
         }
         publish();
         return;
@@ -849,7 +899,9 @@ function handleRoomEvent(message) {
         message.event === 'auto-pause-start' &&
         state.role !== 'host' &&
         message.payload?.navigationId === state.sharedNavigation?.id &&
-        state.followingHost === true
+        state.followingHost === true &&
+        (!Array.isArray(message.payload.targetClientIds) ||
+            message.payload.targetClientIds.includes(state.clientId))
     ) {
         sendTab(
             { type: 'AUTO_PAUSE', ...message.payload },
@@ -864,22 +916,40 @@ function handleRoomEvent(message) {
         const targetClientId = message.payload?.targetClientId;
         const updates = message.payload?.settings || {};
         const isHostUpdate = message.from === state.hostClientId;
-        const isOwnAutoFollowUpdate =
+        const isOwnMemberPreferenceUpdate =
             message.from === targetClientId &&
             (targetClientId === state.clientId || state.role === 'host');
 
-        // The host may edit any member. A member may only update their own auto-follow option.
-        if (!targetClientId || (!isHostUpdate && !isOwnAutoFollowUpdate)) return;
+        // The host manages permissions; a member can edit only delegated preferences.
+        if (!targetClientId || (!isHostUpdate && !isOwnMemberPreferenceUpdate)) return;
 
         const allowedKeys = isHostUpdate
-            ? ['canControlPlayback', 'canSeek', 'autoFollow']
-            : ['autoFollow'];
+            ? [
+                  'canControlPlayback',
+                  'canSeek',
+                  'autoFollow',
+                  'canManageAutoPause',
+                  'autoPauseEnabled',
+                  'canManagePauseOnBuffer',
+                  'pauseOnBufferEnabled',
+              ]
+            : ['autoFollow', 'autoPauseEnabled', 'pauseOnBufferEnabled'];
         const currentSettings = getMemberSettings(targetClientId);
 
         for (const key of allowedKeys) {
             if (typeof updates[key] === 'boolean') {
                 currentSettings[key] = updates[key];
             }
+        }
+
+        if (targetClientId === state.clientId) sendBufferingSettings();
+        if (
+            state.role === 'host' &&
+            (Object.hasOwn(updates, 'canManageAutoPause') ||
+                updates.autoPauseEnabled === true)
+        ) {
+            state.autoPauseStartedNavigationId = '';
+            startAutoPauseWhenReady();
         }
 
         if (
@@ -1061,6 +1131,7 @@ function hostPageDetected(tabId, candidate) {
         switchRoomTab(tabId);
         state.videoFrameId = candidate.frameId;
         state.videoReady = true;
+        sendRoomTabState(candidate.frameId);
 
         if (!state.sharedNavigation) {
             state.sharedNavigation = {
@@ -1088,6 +1159,7 @@ function hostPageDetected(tabId, candidate) {
             switchRoomTab(tabId);
             state.videoFrameId = candidate.frameId;
             state.videoReady = true;
+            sendRoomTabState(candidate.frameId);
             publish();
         }
 
@@ -1203,6 +1275,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             if (tabId === state.tabId) {
                 setTabMarker(tabId, true);
                 const wasReady = state.videoReady;
+                const previousVideoFrameId = state.videoFrameId;
                 const selected = selectVideoFrame(tabId);
 
                 if (
@@ -1225,6 +1298,13 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                             navigationId: state.sharedNavigation.id,
                         });
                     }
+                }
+
+                if (
+                    selected &&
+                    (!wasReady || previousVideoFrameId !== selected.frameId)
+                ) {
+                    sendRoomTabState(selected.frameId);
                 }
 
                 announceNavigationReady();
@@ -1274,12 +1354,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 return;
             }
 
-            // Followers send control actions, but their periodic clock samples and
-            // in-progress seek samples can fight the host's own playback state.
+            // Forward seek samples for smooth dragging; periodic clock samples from
+            // followers would still fight the host's playback clock.
             if (
                 state.role !== 'host' &&
                 !message.snapshot &&
-                ['time', 'seek'].includes(message.videoState?.action)
+                message.videoState?.action === 'time'
             ) {
                 return;
             }
@@ -1311,12 +1391,22 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.videoReady &&
             state.sharedNavigation?.id
         ) {
+            const isBuffering = message.buffering === true;
+            const enabledForMember = isBufferPauseEnabledForMember(
+                state.clientId,
+            );
+
             if (state.role === 'host') {
-                updateBufferingMember(state.clientId, message.buffering === true);
-            } else if (state.followingHost === true) {
+                if (!isBuffering || enabledForMember) {
+                    updateBufferingMember(state.clientId, isBuffering);
+                }
+            } else if (
+                state.followingHost === true &&
+                (!isBuffering || enabledForMember)
+            ) {
                 sendRoomEvent('buffering-status', {
                     navigationId: state.sharedNavigation.id,
-                    buffering: message.buffering === true,
+                    buffering: isBuffering,
                 });
             }
             return;
@@ -1340,6 +1430,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             switchRoomTab(candidate.tabId);
             state.videoFrameId = selected?.frameId ?? candidate.frameId;
             state.videoReady = true;
+            sendRoomTabState(state.videoFrameId);
             state.currentVideoUrl = url;
             state.currentPlayback = null;
             state.sharedNavigation = {
@@ -1416,6 +1507,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 'canControlPlayback',
                 'canSeek',
                 'autoFollow',
+                'canManageAutoPause',
+                'canManagePauseOnBuffer',
             ];
 
             if (
@@ -1429,19 +1522,39 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const settings = getMemberSettings(targetClientId);
             settings[key] = !!value;
 
+            const settingsUpdate = { [key]: settings[key] };
+            if (key === 'canManageAutoPause' && settings[key]) {
+                settings.autoPauseEnabled = !!state.autoPause.enabled;
+                settingsUpdate.autoPauseEnabled = settings.autoPauseEnabled;
+            }
+            if (key === 'canManagePauseOnBuffer' && settings[key]) {
+                settings.pauseOnBufferEnabled = !!state.pauseOnBuffer;
+                settingsUpdate.pauseOnBufferEnabled =
+                    settings.pauseOnBufferEnabled;
+            }
+
             publish();
             sendRoomEvent('member-settings', {
                 targetClientId,
-                settings: { [key]: settings[key] },
+                settings: settingsUpdate,
             });
             return;
         }
 
-        if (
-            message.type === 'SET_AUTO_PAUSE' &&
-            state.role === 'host' &&
-            state.connected
-        ) {
+        if (message.type === 'SET_AUTO_PAUSE' && state.connected) {
+            if (state.role !== 'host') {
+                const settings = getMemberSettings(state.clientId);
+                if (!settings.canManageAutoPause) return;
+
+                settings.autoPauseEnabled = !!message.enabled;
+                publish();
+                sendRoomEvent('member-settings', {
+                    targetClientId: state.clientId,
+                    settings: { autoPauseEnabled: settings.autoPauseEnabled },
+                });
+                return;
+            }
+
             const requestedDuration =
                 message.duration === 'manual'
                     ? 'manual'
@@ -1451,47 +1564,58 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 : requestedDuration === 'manual'
                   ? 'manual'
                   : 5;
+            const wasEnabled = state.autoPause.enabled;
             state.autoPause = {
                 enabled: !!message.enabled,
                 duration,
             };
+            if (!wasEnabled && state.autoPause.enabled) {
+                state.autoPauseStartedNavigationId = '';
+            }
             publish();
             sendRoomEvent('room-settings', {
                 autoPause: state.autoPause,
                 pauseOnBuffer: state.pauseOnBuffer,
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
             });
+            if (state.autoPause.enabled && !wasEnabled) {
+                startAutoPauseWhenReady();
+            }
             return;
         }
 
-        if (
-            message.type === 'SET_PAUSE_ON_BUFFER' &&
-            state.role === 'host' &&
-            state.connected
-        ) {
-            state.pauseOnBuffer = !!message.enabled;
-            state.pauseOnBufferDelay = [3, 5].includes(Number(message.delay))
-                ? Number(message.delay)
-                : 5;
+        if (message.type === 'SET_PAUSE_ON_BUFFER' && state.connected) {
+            if (state.role === 'host') {
+                state.pauseOnBuffer = !!message.enabled;
+                state.pauseOnBufferDelay = [3, 5].includes(Number(message.delay))
+                    ? Number(message.delay)
+                    : 5;
 
-            sendTab(
-                {
-                    type: 'BUFFERING_SETTINGS',
-                    delay: state.pauseOnBufferDelay,
-                },
-                state.videoFrameId,
-            );
+                if (!state.pauseOnBuffer) {
+                    updateBufferingMember(state.clientId, false);
+                }
 
-            if (!state.pauseOnBuffer) {
-                state.bufferingMembers = [];
-                finishBufferingPause();
+                sendBufferingSettings();
+                publish();
+                sendRoomEvent('room-settings', {
+                    autoPause: state.autoPause,
+                    pauseOnBuffer: state.pauseOnBuffer,
+                    pauseOnBufferDelay: state.pauseOnBufferDelay,
+                });
+                return;
             }
 
+            const settings = getMemberSettings(state.clientId);
+            if (!settings.canManagePauseOnBuffer) return;
+
+            settings.pauseOnBufferEnabled = !!message.enabled;
+            sendBufferingSettings();
             publish();
-            sendRoomEvent('room-settings', {
-                autoPause: state.autoPause,
-                pauseOnBuffer: state.pauseOnBuffer,
-                pauseOnBufferDelay: state.pauseOnBufferDelay,
+            sendRoomEvent('member-settings', {
+                targetClientId: state.clientId,
+                settings: {
+                    pauseOnBufferEnabled: settings.pauseOnBufferEnabled,
+                },
             });
             return;
         }

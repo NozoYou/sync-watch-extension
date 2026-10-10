@@ -11,6 +11,10 @@ function defaultMemberSettings() {
         canControlPlayback: true,
         canSeek: true,
         autoFollow: false,
+        canManageAutoPause: false,
+        autoPauseEnabled: false,
+        canManagePauseOnBuffer: false,
+        pauseOnBufferEnabled: false,
     };
 }
 
@@ -320,8 +324,16 @@ webSocketServer.on('connection', (webSocket) => {
             }
 
             if (message.event === 'buffering-status') {
+                const memberSettings =
+                    room.memberSettings.get(webSocket.clientId) ||
+                    defaultMemberSettings();
+                const memberCanReport = memberSettings.canManagePauseOnBuffer
+                    ? memberSettings.pauseOnBufferEnabled
+                    : room.pauseOnBuffer;
+
                 if (
                     webSocket.clientId === room.hostClientId ||
+                    (message.payload.buffering === true && !memberCanReport) ||
                     message.payload.navigationId !== room.sharedNavigation?.id ||
                     typeof message.payload.buffering !== 'boolean'
                 ) {
@@ -378,10 +390,22 @@ webSocketServer.on('connection', (webSocket) => {
                 (webSocket.clientId !== room.hostClientId ||
                     message.payload.navigationId !== room.sharedNavigation?.id ||
                     typeof message.payload.pauseId !== 'string' ||
+                    !Array.isArray(message.payload.targetClientIds) ||
                     (message.payload.resumeAt !== null &&
                         !Number.isFinite(message.payload.resumeAt)))
             ) {
                 return;
+            }
+
+            if (message.event === 'auto-pause-start') {
+                message.payload.targetClientIds = [
+                    ...new Set(
+                        message.payload.targetClientIds.filter((clientId) =>
+                            room.has(clientId),
+                        ),
+                    ),
+                ];
+                if (!message.payload.targetClientIds.length) return;
             }
 
             if (
@@ -411,8 +435,9 @@ webSocketServer.on('connection', (webSocket) => {
                 if (
                     (['play', 'pause'].includes(action) &&
                         !memberSettings.canControlPlayback) ||
-                    (action === 'seeked' && !memberSettings.canSeek) ||
-                    ['time', 'seek'].includes(action)
+                    (['seek', 'seeked'].includes(action) &&
+                        !memberSettings.canSeek) ||
+                    action === 'time'
                 ) {
                     return;
                 }
@@ -424,16 +449,36 @@ webSocketServer.on('connection', (webSocket) => {
                 const isHost = webSocket.clientId === room.hostClientId;
                 const isSelf = webSocket.clientId === targetClientId;
 
-                // Hosts manage all three settings; members may change their own auto-follow option.
+                // Hosts grant preferences; a member may change only options granted to them.
                 if (!room.has(targetClientId) || (!isHost && !isSelf)) return;
 
                 const allowedSettings = isHost
-                    ? ['canControlPlayback', 'canSeek', 'autoFollow']
-                    : ['autoFollow'];
+                    ? [
+                          'canControlPlayback',
+                          'canSeek',
+                          'autoFollow',
+                          'canManageAutoPause',
+                          'autoPauseEnabled',
+                          'canManagePauseOnBuffer',
+                          'pauseOnBufferEnabled',
+                      ]
+                    : ['autoFollow', 'autoPauseEnabled', 'pauseOnBufferEnabled'];
                 const updates = {};
 
                 for (const key of allowedSettings) {
                     if (typeof requestedSettings[key] === 'boolean') {
+                        if (
+                            !isHost &&
+                            ((key === 'autoPauseEnabled' &&
+                                !room.memberSettings.get(targetClientId)
+                                    ?.canManageAutoPause) ||
+                                (key === 'pauseOnBufferEnabled' &&
+                                    !room.memberSettings.get(targetClientId)
+                                        ?.canManagePauseOnBuffer))
+                        ) {
+                            continue;
+                        }
+
                         updates[key] = requestedSettings[key];
                     }
                 }
@@ -442,6 +487,25 @@ webSocketServer.on('connection', (webSocket) => {
 
                 const currentSettings =
                     room.memberSettings.get(targetClientId) || defaultMemberSettings();
+
+                // When control is first granted, inherit the current room default.
+                if (
+                    isHost &&
+                    updates.canManageAutoPause === true &&
+                    !currentSettings.canManageAutoPause &&
+                    !Object.hasOwn(updates, 'autoPauseEnabled')
+                ) {
+                    updates.autoPauseEnabled = room.autoPause.enabled;
+                }
+                if (
+                    isHost &&
+                    updates.canManagePauseOnBuffer === true &&
+                    !currentSettings.canManagePauseOnBuffer &&
+                    !Object.hasOwn(updates, 'pauseOnBufferEnabled')
+                ) {
+                    updates.pauseOnBufferEnabled = room.pauseOnBuffer;
+                }
+
                 room.memberSettings.set(targetClientId, {
                     ...currentSettings,
                     ...updates,

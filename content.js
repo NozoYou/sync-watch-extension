@@ -32,10 +32,21 @@
     let lastBufferingReportAt = 0;
     let bufferingCandidate = null;
     let bufferingDelaySeconds = 5;
+    let bufferingReportingEnabled = false;
     const bufferingPauseStates = new WeakMap();
 
     const tabTitlePrefix = '[一起看] ';
     const tabIconId = '__sync_watch_tab_icon';
+    const tabIconSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="18" fill="#7666f4" />
+            <path
+                d="M25 17.5c-1.2-.7-2.7.2-2.7 1.6v25.8c0 1.4 1.5 2.3 2.7 1.6l21-12.9a1.9 1.9 0 0 0 0-3.2z"
+                fill="#fff"
+            />
+        </svg>
+    `;
+    const tabIconDataUrl = `data:image/svg+xml,${encodeURIComponent(tabIconSvg)}`;
 
     function chooseVideo() {
         const videos = [...document.querySelectorAll('video')];
@@ -215,6 +226,7 @@
         if (bufferingCandidate === currentVideo && bufferingTimer !== null) return;
 
         bufferingCandidate = currentVideo;
+        if (!bufferingReportingEnabled) return;
 
         // Wait for the room's configured interval before treating this as a stall.
         bufferingTimer = setTimeout(() => {
@@ -407,20 +419,32 @@
     function updateTabIcon() {
         if (!isTop || !document.head) return;
 
-        const existingIcon = document.getElementById(tabIconId);
+        let existingIcon = document.getElementById(tabIconId);
         if (!tabIconEnabled) {
             existingIcon?.remove();
             return;
         }
 
-        if (existingIcon) return;
+        if (!existingIcon) {
+            existingIcon = document.createElement('link');
+            existingIcon.id = tabIconId;
+        }
 
-        const icon = document.createElement('link');
-        icon.id = tabIconId;
-        icon.rel = 'icon';
-        icon.type = 'image/svg+xml';
-        icon.href = chrome.runtime.getURL('tab-icon.svg');
-        document.head.append(icon);
+        // Reassert the favicon after sites replace their own icon link.
+        if (existingIcon.rel !== 'icon') existingIcon.rel = 'icon';
+        if (existingIcon.type !== 'image/svg+xml') {
+            existingIcon.type = 'image/svg+xml';
+        }
+        if (existingIcon.getAttribute('sizes') !== 'any') {
+            existingIcon.setAttribute('sizes', 'any');
+        }
+        if (existingIcon.href !== tabIconDataUrl) {
+            existingIcon.href = tabIconDataUrl;
+        }
+
+        if (document.head.lastElementChild !== existingIcon) {
+            document.head.append(existingIcon);
+        }
     }
 
     function updateTabMarker(enabled, modifyIcon) {
@@ -532,13 +556,30 @@
             bufferingDelaySeconds = [3, 5].includes(message.bufferingDelay)
                 ? message.bufferingDelay
                 : 5;
+            bufferingReportingEnabled = message.bufferingEnabled === true;
+            if (bufferingReportingEnabled && bufferingCandidate) {
+                scheduleBufferingStatus(bufferingCandidate);
+            }
         } else if (message.type === 'BUFFERING_SETTINGS') {
             bufferingDelaySeconds = [3, 5].includes(message.delay)
                 ? message.delay
                 : 5;
+            bufferingReportingEnabled = message.enabled === true;
+
+            if (!bufferingReportingEnabled) {
+                clearTimeout(bufferingTimer);
+                bufferingTimer = null;
+                if (bufferingReported) {
+                    reportBufferingStatus(false, bufferingVideo);
+                }
+            }
 
             // Reapply a changed delay to an in-progress, not-yet-reported stall.
-            if (bufferingCandidate && !bufferingReported) {
+            if (
+                bufferingReportingEnabled &&
+                bufferingCandidate &&
+                !bufferingReported
+            ) {
                 clearTimeout(bufferingTimer);
                 bufferingTimer = null;
                 scheduleBufferingStatus(bufferingCandidate);

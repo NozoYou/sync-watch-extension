@@ -73,6 +73,10 @@ function renderHostMemberSettings(state) {
             canControlPlayback: true,
             canSeek: true,
             autoFollow: false,
+            canManageAutoPause: false,
+            autoPauseEnabled: false,
+            canManagePauseOnBuffer: false,
+            pauseOnBufferEnabled: false,
             ...(state.memberSettings?.[clientId] || {}),
         };
         const card = document.createElement('div');
@@ -89,6 +93,8 @@ function renderHostMemberSettings(state) {
             ['canControlPlayback', '播放 / 暂停'],
             ['canSeek', '进度条跳转'],
             ['autoFollow', '自动跟随新视频'],
+            ['canManageAutoPause', '允许成员自选新视频就绪暂停'],
+            ['canManagePauseOnBuffer', '允许成员自选卡顿触发暂停'],
         ];
 
         for (const [key, labelText] of fields) {
@@ -327,20 +333,47 @@ function render(state) {
         renderHostMemberSettings(state);
         renderInjectionDebug(state);
 
-        const autoPause = state.autoPause || { enabled: false, duration: 5 };
         const isHost = state.role === 'host';
-        getElement('auto-pause').checked = !!autoPause.enabled;
-        getElement('auto-pause').disabled = !isHost || !state.connected;
+        const ownSettings = state.memberSettings?.[state.clientId] || {};
+        const canManageAutoPause =
+            isHost || ownSettings.canManageAutoPause === true;
+        const canManageBufferPause =
+            isHost || ownSettings.canManagePauseOnBuffer === true;
+        const autoPause = state.autoPause || { enabled: false, duration: 5 };
+        getElement('auto-pause-label').textContent = isHost
+            ? '新视频就绪后自动暂停（本机）'
+            : '我跟随的新视频就绪后自动暂停';
+        getElement('auto-pause').checked = isHost
+            ? !!autoPause.enabled
+            : canManageAutoPause
+              ? !!ownSettings.autoPauseEnabled
+              : !!autoPause.enabled;
+        getElement('auto-pause').disabled =
+            !canManageAutoPause || !state.connected;
         getElement('auto-pause-duration').value = String(autoPause.duration || 5);
         getElement('auto-pause-duration').disabled = !isHost || !state.connected;
+        getElement('auto-pause-owner').textContent = canManageAutoPause
+            ? '暂停时长由房主管理。'
+            : '自动暂停开关与时长由房主管理。';
         getElement('auto-pause-owner').classList.toggle('hidden', isHost);
-        getElement('pause-on-buffer').checked = !!state.pauseOnBuffer;
-        getElement('pause-on-buffer').disabled = !isHost || !state.connected;
+        getElement('pause-on-buffer-label').textContent = isHost
+            ? '有人卡顿时暂停全房间'
+            : '我的卡顿触发全房间暂停';
+        getElement('pause-on-buffer').checked = isHost
+            ? !!state.pauseOnBuffer
+            : canManageBufferPause
+              ? !!ownSettings.pauseOnBufferEnabled
+              : !!state.pauseOnBuffer;
+        getElement('pause-on-buffer').disabled =
+            !canManageBufferPause || !state.connected;
         getElement('pause-on-buffer-duration').value = String(
             state.pauseOnBufferDelay || 5,
         );
         getElement('pause-on-buffer-duration').disabled =
             !isHost || !state.connected;
+        getElement('pause-on-buffer-owner').textContent = canManageBufferPause
+            ? '卡顿等待时长由房主管理。'
+            : '卡顿开关权限与等待时长由房主管理。';
         getElement('pause-on-buffer-owner').classList.toggle('hidden', isHost);
         renderShareHistory(state.navigationHistory || []);
 
