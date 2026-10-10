@@ -8,6 +8,13 @@ let selectedPermissionTemplate = '';
 let displayNameEdited = false;
 let pendingDisplayNameSave = null;
 let displayNameComposing = false;
+let selectedUiStyle = '1';
+
+function applyUiStyle(style) {
+    selectedUiStyle = style === '2' ? '2' : '1';
+    document.body.classList.toggle('style-2', selectedUiStyle === '2');
+    getElement('ui-style').value = selectedUiStyle;
+}
 
 function updateLocalGreeting() {
     const hour = new Date().getHours();
@@ -806,6 +813,10 @@ chrome.storage.local.get(
     render,
 );
 
+chrome.storage.local.get('uiStyle', ({ uiStyle }) => {
+    applyUiStyle(uiStyle);
+});
+
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'STATE') render(message.state);
 });
@@ -959,6 +970,11 @@ const menuToggle = getElement('menu-toggle');
 const mainMenuPanel = getElement('main-menu-panel');
 const savedProgressToggle = getElement('saved-progress-toggle');
 const savedProgressPanel = getElement('saved-progress-panel');
+
+getElement('ui-style').addEventListener('change', (event) => {
+    applyUiStyle(event.target.value);
+    chrome.storage.local.set({ uiStyle: selectedUiStyle });
+});
 
 function setMenuOpen(isOpen) {
     mainMenuPanel.classList.toggle('hidden', !isOpen);
