@@ -569,7 +569,14 @@
     }
 
     function handleRuntimeMessage(message) {
-        if (message.type === 'APPLY_REMOTE_VIDEO') {
+        if (message.type === 'PAUSE_FOR_ROOM_INJECTION') {
+            for (const currentVideo of document.querySelectorAll('video')) {
+                if (!currentVideo.paused) {
+                    expectMediaEvent(currentVideo, 'paused', true);
+                    currentVideo.pause();
+                }
+            }
+        } else if (message.type === 'APPLY_REMOTE_VIDEO') {
             applyVideo(message.videoState);
         } else if (message.type === 'AUTO_PAUSE') {
             applyAutomaticPause(message);

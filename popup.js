@@ -18,6 +18,14 @@ function formatPlaybackTime(seconds) {
 
 function renderPlaybackProgress() {
     const panel = getElement('room-playback');
+    const videoUrl = safeHistoryUrl(
+        lastRenderedState?.sharedNavigation?.url || currentPlayback?.url,
+    );
+
+    panel.classList.toggle('is-openable', !!videoUrl);
+    panel.setAttribute('aria-disabled', String(!videoUrl));
+    panel.tabIndex = videoUrl ? 0 : -1;
+    panel.title = videoUrl ? '点击在当前标签页打开房间正在播放的视频' : '';
 
     if (!currentPlayback) {
         panel.classList.add('hidden');
@@ -34,7 +42,12 @@ function renderPlaybackProgress() {
     const elapsed = currentPlayback.paused
         ? currentPlayback.time
         : currentPlayback.time +
-          Math.max(0, (Date.now() - currentPlayback.at) / 1000) *
+          Math.max(
+              0,
+              (Date.now() -
+                  (Number(currentPlayback.receivedAt) || currentPlayback.at)) /
+                  1000,
+          ) *
               (currentPlayback.rate || 1);
     const duration = Number(currentPlayback.duration) || 0;
 
@@ -47,6 +60,35 @@ function renderPlaybackProgress() {
         ? Math.min(100, (elapsed / duration) * 100)
         : 0;
 }
+
+async function openRoomVideoInCurrentTab() {
+    const videoUrl = safeHistoryUrl(
+        lastRenderedState?.sharedNavigation?.url || currentPlayback?.url,
+    );
+    if (!videoUrl) return;
+
+    // Let the background pause and gate playback before navigating this tab.
+    const [activeTab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+    });
+    chrome.runtime.sendMessage({
+        type: 'OPEN_ROOM_VIDEO',
+        url: videoUrl,
+        tabId: activeTab?.id,
+    });
+}
+
+getElement('room-playback').addEventListener('click', () => {
+    openRoomVideoInCurrentTab();
+});
+
+getElement('room-playback').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+
+    event.preventDefault();
+    openRoomVideoInCurrentTab();
+});
 
 function safeHistoryUrl(value) {
     try {
@@ -299,87 +341,118 @@ function renderSelfInjectionControl(state) {
 }
 
 function renderShareHistory(history = []) {
-    const panel = getElement('share-history');
-    const recentList = getElement('recent-share-list');
-    const olderList = getElement('older-share-list');
-    const olderDetails = getElement('older-shares');
+    const panels = [
+        {
+            panel: getElement('share-history'),
+            recentList: getElement('recent-share-list'),
+            olderList: getElement('older-share-list'),
+            openInCurrentTab: false,
+        },
+        {
+            panel: getElement('share-history-current'),
+            recentList: getElement('recent-share-current-list'),
+            olderList: getElement('older-share-current-list'),
+            openInCurrentTab: true,
+        },
+    ];
     const newestFirst = [...history].slice(0, 15);
     const signature = JSON.stringify(newestFirst);
 
-    // Keep expanded older entries open during unrelated popup state updates.
+    // Keep expanded entries open during unrelated popup state updates.
     if (signature === renderedHistorySignature) return;
     renderedHistorySignature = signature;
     const recent = newestFirst.slice(0, 3);
     const older = newestFirst.slice(3);
 
-    recentList.replaceChildren();
-    olderList.replaceChildren();
-    panel.classList.toggle('hidden', newestFirst.length === 0);
-    olderDetails.classList.toggle('hidden', older.length === 0);
-    getElement('older-shares-summary').textContent = `更早的分享（${older.length}）`;
-
-    function createOpenButton(navigation) {
+    function createOpenButton(navigation, currentTab = false) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'quiet share-history-open';
-        button.textContent = '↗ 新标签页';
-        button.title = '在新标签页打开此视频';
+        button.textContent = currentTab ? '当前页' : '↗ 新标签页';
+        button.title = currentTab
+            ? '在当前标签页打开此视频'
+            : '在新标签页打开此视频';
         button.addEventListener('click', () => {
-            try {
-                const url = new URL(navigation.url);
-                if (['http:', 'https:'].includes(url.protocol)) {
-                    chrome.tabs.create({ url: url.href });
-                }
-            } catch {
-                // Ignore malformed URLs from stale or invalid room history.
+            const url = safeHistoryUrl(navigation.url);
+            if (!url) return;
+
+            if (currentTab) {
+                chrome.tabs.update({ url });
+            } else {
+                chrome.tabs.create({ url });
             }
         });
         return button;
     }
 
-    for (const navigation of recent) {
+    function createHistoryRow(navigation, targetList, openInCurrentTab) {
         const row = document.createElement('div');
         row.className = 'share-history-item';
         const main = document.createElement('div');
         main.className = 'share-history-item-main';
 
-        const title = document.createElement('strong');
-        title.className = 'share-history-title';
-        title.textContent = navigation.title || navigation.url || '未命名视频';
+        if (openInCurrentTab) {
+            const title = document.createElement('a');
+            title.className = 'share-history-current-title';
+            title.href = safeHistoryUrl(navigation.url) || '#';
+            title.title = navigation.url || '';
+            title.textContent = navigation.title || navigation.url || '未命名视频';
+            title.addEventListener('click', (event) => {
+                event.preventDefault();
+                const url = safeHistoryUrl(navigation.url);
+                if (url) chrome.tabs.update({ url });
+            });
+            main.append(title);
+        } else {
+            const details = document.createElement('details');
+            const title = document.createElement('summary');
+            title.className = 'share-history-title';
+            title.textContent = navigation.title || navigation.url || '未命名视频';
 
-        const link = document.createElement('a');
-        link.className = 'share-history-url';
-        link.href = safeHistoryUrl(navigation.url) || '#';
-        link.target = '_blank';
-        link.rel = 'noreferrer';
-        link.textContent = navigation.url || '';
+            const link = document.createElement('a');
+            link.className = 'share-history-url';
+            link.href = safeHistoryUrl(navigation.url) || '#';
+            link.target = '_blank';
+            link.rel = 'noreferrer';
+            link.textContent = navigation.url || '';
 
-        main.append(title, link);
-        row.append(main, createOpenButton(navigation));
-        recentList.append(row);
+            details.append(title, link);
+            main.append(details);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'share-history-actions';
+        actions.append(createOpenButton(navigation));
+
+        if (!openInCurrentTab) {
+            actions.prepend(createOpenButton(navigation, true));
+        }
+
+        row.append(main, actions);
+        targetList.append(row);
     }
 
-    for (const navigation of older) {
-        const row = document.createElement('div');
-        row.className = 'share-history-item';
-        const main = document.createElement('div');
-        main.className = 'share-history-item-main';
-        const details = document.createElement('details');
-        const title = document.createElement('summary');
-        title.className = 'share-history-title';
-        title.textContent = navigation.title || '未命名视频';
+    for (const view of panels) {
+        view.recentList.replaceChildren();
+        view.olderList.replaceChildren();
+        view.panel.classList.toggle('hidden', newestFirst.length === 0);
+        view.olderList.classList.toggle('hidden', older.length === 0);
 
-        const link = document.createElement('a');
-        link.className = 'share-history-url';
-        link.href = safeHistoryUrl(navigation.url) || '#';
-        link.target = '_blank';
-        link.rel = 'noreferrer';
-        link.textContent = navigation.url || '';
+        for (const navigation of recent) {
+            createHistoryRow(
+                navigation,
+                view.recentList,
+                view.openInCurrentTab,
+            );
+        }
 
-        details.append(title, link);
-        main.append(details);
-        row.append(main, createOpenButton(navigation));
-        olderList.append(row);
+        for (const navigation of older) {
+            createHistoryRow(
+                navigation,
+                view.olderList,
+                view.openInCurrentTab,
+            );
+        }
     }
 }
 
@@ -584,6 +657,7 @@ function render(state) {
         getElement('pause-on-buffer-duration').disabled = true;
         getElement('pause-on-buffer-owner').classList.add('hidden');
         getElement('share-history').classList.add('hidden');
+        getElement('share-history-current').classList.add('hidden');
         getElement('recommendations-panel').classList.add('hidden');
     }
 

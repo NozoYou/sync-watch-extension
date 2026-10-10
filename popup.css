@@ -268,6 +268,16 @@ button:hover {
     background: #22243a;
 }
 
+.room-playback.is-openable {
+    cursor: pointer;
+}
+
+.room-playback.is-openable:hover,
+.room-playback.is-openable:focus-visible {
+    outline: 1px solid #7766f5;
+    background: #292b43;
+}
+
 .room-playback-heading,
 .room-playback-time {
     display: flex;
@@ -551,6 +561,19 @@ button:hover {
     overflow-wrap: anywhere;
 }
 
+.share-history-current-title {
+    display: block;
+    color: #dedaff;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+}
+
+.share-history-current-title:hover {
+    color: #c5befc;
+    text-decoration: underline;
+}
+
 .share-history-url {
     display: block;
     margin-top: 4px;
@@ -563,6 +586,13 @@ button:hover {
     flex: none;
     padding: 5px 7px;
     font-size: 10px;
+}
+
+.share-history-actions {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 3px;
 }
 
 .recommendation-item {
@@ -605,15 +635,6 @@ button:hover {
 
 .recommendation-actions button {
     padding: 5px 6px;
-    font-size: 10px;
-}
-
-.older-shares {
-    margin-top: 6px;
-    padding: 7px 8px;
-}
-
-.older-shares summary {
     font-size: 10px;
 }
 

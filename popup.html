@@ -214,7 +214,13 @@
             <div id="room-member-list" class="room-member-list" aria-label="房间成员"></div>
 
             <!-- Shows the host's current shared title and playback position. -->
-            <section id="room-playback" class="room-playback hidden">
+            <section
+                id="room-playback"
+                class="room-playback hidden"
+                role="button"
+                tabindex="-1"
+                aria-disabled="true"
+            >
                 <div class="room-playback-heading">
                     <strong id="room-playback-title">等待视频状态…</strong>
                     <span id="room-playback-status">—</span>
@@ -257,10 +263,13 @@
         <details id="share-history" class="feature-menu share-history hidden">
             <summary>分享记录</summary>
             <div id="recent-share-list"></div>
-            <details id="older-shares" class="older-shares hidden">
-                <summary id="older-shares-summary">更早的分享</summary>
-                <div id="older-share-list"></div>
-            </details>
+            <div id="older-share-list"></div>
+        </details>
+
+        <details id="share-history-current" class="feature-menu share-history hidden">
+            <summary>分享记录1</summary>
+            <div id="recent-share-current-list"></div>
+            <div id="older-share-current-list"></div>
         </details>
 
         <details id="recommendations-panel" class="feature-menu recommendations-panel hidden">
