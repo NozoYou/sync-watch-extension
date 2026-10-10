@@ -344,6 +344,13 @@ button:hover {
     font-size: 10px;
 }
 
+.member-settings-apply-all {
+    margin-top: 5px;
+    padding: 4px 0;
+    color: #c5befc;
+    font-size: 10px;
+}
+
 .navigation-panel {
     margin-top: 9px;
     padding: 9px 10px;

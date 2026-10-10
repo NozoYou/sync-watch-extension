@@ -1498,6 +1498,75 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         }
 
         if (
+            message.type === 'APPLY_MEMBER_SETTINGS_TO_ROOM' &&
+            state.role === 'host' &&
+            state.connected
+        ) {
+            const { sourceClientId, settings: requestedSettings } = message;
+            const allowedKeys = [
+                'canControlPlayback',
+                'canSeek',
+                'autoFollow',
+                'canManageAutoPause',
+                'canManagePauseOnBuffer',
+            ];
+
+            if (
+                !state.members.includes(sourceClientId) ||
+                sourceClientId === state.hostClientId ||
+                !requestedSettings ||
+                typeof requestedSettings !== 'object'
+            ) {
+                return;
+            }
+
+            const permissionSettings = Object.fromEntries(
+                allowedKeys
+                    .filter((key) => typeof requestedSettings[key] === 'boolean')
+                    .map((key) => [key, requestedSettings[key]]),
+            );
+
+            if (Object.keys(permissionSettings).length === 0) return;
+
+            for (const targetClientId of state.members) {
+                if (
+                    targetClientId === state.hostClientId ||
+                    targetClientId === sourceClientId
+                ) {
+                    continue;
+                }
+
+                const targetSettings = getMemberSettings(targetClientId);
+                const settingsUpdate = { ...permissionSettings };
+
+                // Newly delegated switches inherit the current room defaults.
+                if (
+                    settingsUpdate.canManageAutoPause === true &&
+                    !targetSettings.canManageAutoPause
+                ) {
+                    settingsUpdate.autoPauseEnabled =
+                        !!state.autoPause.enabled;
+                }
+                if (
+                    settingsUpdate.canManagePauseOnBuffer === true &&
+                    !targetSettings.canManagePauseOnBuffer
+                ) {
+                    settingsUpdate.pauseOnBufferEnabled =
+                        !!state.pauseOnBuffer;
+                }
+
+                Object.assign(targetSettings, settingsUpdate);
+                sendRoomEvent('member-settings', {
+                    targetClientId,
+                    settings: settingsUpdate,
+                });
+            }
+
+            publish();
+            return;
+        }
+
+        if (
             message.type === 'UPDATE_MEMBER_SETTINGS' &&
             state.role === 'host' &&
             state.connected

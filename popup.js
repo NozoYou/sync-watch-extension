@@ -106,6 +106,7 @@ function renderHostMemberSettings(state) {
             checkbox.checked = !!settings[key];
             checkbox.disabled = !state.connected;
             checkbox.addEventListener('change', () => {
+                settings[key] = checkbox.checked;
                 chrome.runtime.sendMessage({
                     type: 'UPDATE_MEMBER_SETTINGS',
                     targetClientId: clientId,
@@ -118,7 +119,26 @@ function renderHostMemberSettings(state) {
             options.append(label);
         }
 
-        card.append(name, options);
+        const applyToRoomButton = document.createElement('button');
+        applyToRoomButton.className = 'quiet member-settings-apply-all';
+        applyToRoomButton.type = 'button';
+        applyToRoomButton.textContent = '将此成员权限应用到全房间';
+        applyToRoomButton.disabled = !state.connected || members.length < 2;
+        applyToRoomButton.title =
+            '把上方勾选的权限设置应用给房间内的所有成员';
+        applyToRoomButton.addEventListener('click', () => {
+            const permissionSettings = Object.fromEntries(
+                fields.map(([key]) => [key, !!settings[key]]),
+            );
+
+            chrome.runtime.sendMessage({
+                type: 'APPLY_MEMBER_SETTINGS_TO_ROOM',
+                sourceClientId: clientId,
+                settings: permissionSettings,
+            });
+        });
+
+        card.append(name, options, applyToRoomButton);
         settingsList.append(card);
     }
 
