@@ -63,6 +63,7 @@ const ready = chrome.storage.local
         'hostClientId',
         'members',
         'memberSettings',
+        'memberInjectionStatus',
         'navigationHistory',
         'autoPause',
         'autoPauseReady',
@@ -109,6 +110,7 @@ function persist() {
         hostClientId: state.hostClientId,
         members: state.members,
         memberSettings: state.memberSettings,
+        memberInjectionStatus: state.memberInjectionStatus,
         navigationHistory: state.navigationHistory,
         autoPause: state.autoPause,
         autoPauseReady: state.autoPauseReady,
@@ -296,9 +298,38 @@ function publishInjectionStatus() {
     publish();
 }
 
+async function resolveRoomTab() {
+    if (state.tabId !== null) {
+        const currentTab = await chrome.tabs.get(state.tabId).catch(() => null);
+        if (currentTab) return currentTab.id;
+        state.tabId = null;
+    }
+
+    if (!state.currentVideoUrl) return null;
+
+    // A member may close the watched tab and reopen the same page while staying
+    // in the room. Rebind to that page before a host or member requests injection.
+    const matchingFrame = [...videoFrames.values()]
+        .filter((frame) => frame.pageUrl === state.currentVideoUrl)
+        .sort((a, b) => Number(b.hasVideo) - Number(a.hasVideo))[0];
+
+    if (matchingFrame) return matchingFrame.tabId;
+
+    const matchingTab = (await chrome.tabs.query({})).find(
+        (tab) => tab.url === state.currentVideoUrl,
+    );
+
+    return matchingTab?.id ?? null;
+}
+
 async function reinjectRoomTab() {
     if (state.tabId === null) {
-        throw new Error('当前房间没有可刷新的标签页。');
+        const matchingTabId = await resolveRoomTab();
+        if (matchingTabId !== null) switchRoomTab(matchingTabId);
+    }
+
+    if (state.tabId === null) {
+        throw new Error('找不到房间正在播放的网页。请先打开相同视频页后重试。');
     }
 
     // Discard old frame heartbeats so the UI waits for the new script instance.
@@ -1272,6 +1303,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
             videoFrames.set(key, candidate);
 
+            // Restore the member's room tab when they reopened the same video
+            // page without leaving the room.
+            if (
+                state.room &&
+                state.role !== 'host' &&
+                state.tabId === null &&
+                candidate.pageUrl === state.currentVideoUrl
+            ) {
+                switchRoomTab(tabId);
+            }
+
             if (tabId === state.tabId) {
                 setTabMarker(tabId, true);
                 const wasReady = state.videoReady;
@@ -1853,6 +1895,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         state.tabId = null;
         state.videoReady = false;
         state.videoFrameId = 0;
-        publish();
+        state.status = '房间仍连接；播放标签页已关闭，打开相同视频页可重新连接。';
+        publishInjectionStatus();
     }
 });

@@ -206,11 +206,27 @@ button:hover {
 .auto-follow-control,
 .tab-marker-control,
 .host-member-settings,
+.self-injection-control,
 .injection-debug,
 .auto-pause-panel,
 .buffering-pause-panel,
 .share-history {
     margin-top: 10px;
+}
+
+.self-injection-control {
+    padding: 8px 9px;
+    border-radius: 8px;
+    background: #1c1d30;
+}
+
+.self-injection-control strong {
+    color: #c4cada;
+    font-size: 11px;
+}
+
+.self-injection-control .small {
+    margin: 4px 0;
 }
 
 /* DEBUG ZONE: diagnostic and reinjection UI is intentionally self-contained. */

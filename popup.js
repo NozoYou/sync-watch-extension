@@ -228,6 +228,37 @@ function renderInjectionDebug(state) {
     }
 }
 
+function renderSelfInjectionControl(state) {
+    const panel = getElement('self-injection-control');
+    const refreshButton = getElement('refresh-my-injection');
+    const statusLabel = getElement('self-injection-status');
+    const isMember = state.role !== 'host' && !!state.room;
+    const report = state.memberInjectionStatus?.[state.clientId];
+
+    panel.classList.toggle('hidden', !isMember);
+    if (!isMember) return;
+
+    if (report?.refreshing) {
+        statusLabel.textContent = '正在重新注入…';
+    } else if (report?.refreshError) {
+        statusLabel.textContent = `重新注入失败：${report.refreshError}`;
+    } else if (report?.responsive && report.hasVideo) {
+        statusLabel.textContent = report.videoBound
+            ? '脚本已注入，视频监听正常。'
+            : '脚本已注入，当前页面尚未绑定视频。';
+    } else if (report?.responsive) {
+        statusLabel.textContent = '脚本已注入，当前标签页未检测到视频。';
+    } else {
+        statusLabel.textContent =
+            '如果页面关闭后重新打开了相同视频，可在这里重新注入。';
+    }
+
+    refreshButton.disabled = !state.connected || !!report?.refreshing;
+    refreshButton.textContent = report?.refreshing
+        ? '处理中…'
+        : '重新注入我的标签页';
+}
+
 function renderShareHistory(history = []) {
     const panel = getElement('share-history');
     const recentList = getElement('recent-share-list');
@@ -352,6 +383,7 @@ function render(state) {
         getElement('modify-tab-icon').disabled = false;
         renderHostMemberSettings(state);
         renderInjectionDebug(state);
+        renderSelfInjectionControl(state);
 
         const isHost = state.role === 'host';
         const ownSettings = state.memberSettings?.[state.clientId] || {};
@@ -444,6 +476,7 @@ function render(state) {
         getElement('modify-tab-icon').disabled = true;
         getElement('host-member-settings').classList.add('hidden');
         getElement('injection-debug').classList.add('hidden');
+        getElement('self-injection-control').classList.add('hidden');
         getElement('auto-pause-panel').classList.add('hidden');
         getElement('pause-on-buffer').checked = false;
         getElement('pause-on-buffer').disabled = true;
@@ -479,6 +512,7 @@ chrome.storage.local.get(
         'sharedNavigation',
         'followResponses',
         'currentPlayback',
+        'memberInjectionStatus',
     ],
     render,
 );
@@ -596,6 +630,10 @@ getElement('join').onclick = async () => {
 getElement('leave').onclick = () => {
     chrome.runtime.sendMessage({ type: 'LEAVE' });
 };
+
+getElement('refresh-my-injection').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'REFRESH_MY_INJECTION' });
+});
 
 getElement('copy-room').onclick = async () => {
     await navigator.clipboard.writeText(getElement('room-code').textContent);
