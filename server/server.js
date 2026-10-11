@@ -202,6 +202,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.autoPause = { enabled: false, duration: 5 };
                 room.pauseOnBuffer = false;
                 room.pauseOnBufferDelay = 5;
+                room.autoCorrectionEnabled = true;
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 room.memberNames = new Map();
@@ -277,6 +278,7 @@ webSocketServer.on('connection', (webSocket) => {
                     autoPause: room.autoPause,
                     pauseOnBuffer: room.pauseOnBuffer,
                     pauseOnBufferDelay: room.pauseOnBufferDelay,
+                    autoCorrectionEnabled: room.autoCorrectionEnabled,
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                     memberNames: Object.fromEntries(room.memberNames),
@@ -448,10 +450,16 @@ webSocketServer.on('connection', (webSocket) => {
                     room.pauseOnBufferDelay = message.payload.pauseOnBufferDelay;
                 }
 
+                if (typeof message.payload.autoCorrectionEnabled === 'boolean') {
+                    room.autoCorrectionEnabled =
+                        message.payload.autoCorrectionEnabled;
+                }
+
                 message.payload = {
                     autoPause: room.autoPause,
                     pauseOnBuffer: room.pauseOnBuffer,
                     pauseOnBufferDelay: room.pauseOnBufferDelay,
+                    autoCorrectionEnabled: room.autoCorrectionEnabled,
                 };
             }
 

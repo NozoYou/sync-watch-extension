@@ -53,6 +53,7 @@ const state = {
     autoPauseStartedNavigationId: '',
     pauseOnBuffer: false,
     pauseOnBufferDelay: 5,
+    autoCorrectionEnabled: true,
     bufferingMembers: [],
     bufferPause: null,
     currentVideoUrl: '',
@@ -100,6 +101,7 @@ const ready = chrome.storage.local
         'autoPauseStartedNavigationId',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
+        'autoCorrectionEnabled',
         'bufferingMembers',
         'bufferPause',
         'currentVideoUrl',
@@ -158,6 +160,7 @@ function persist() {
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         pauseOnBuffer: state.pauseOnBuffer,
         pauseOnBufferDelay: state.pauseOnBufferDelay,
+        autoCorrectionEnabled: state.autoCorrectionEnabled,
         bufferingMembers: state.bufferingMembers,
         bufferPause: state.bufferPause,
         currentVideoUrl: state.currentVideoUrl,
@@ -293,6 +296,7 @@ function sendRoomTabState(frameId = state.videoFrameId) {
             role: state.role,
             bufferingDelay: state.pauseOnBufferDelay,
             bufferingEnabled: isBufferPauseEnabledForMember(state.clientId),
+            autoCorrectionEnabled: state.autoCorrectionEnabled,
         },
         frameId,
     );
@@ -1048,6 +1052,8 @@ async function connectRoom() {
             )
                 ? message.pauseOnBufferDelay
                 : 5;
+            state.autoCorrectionEnabled =
+                message.autoCorrectionEnabled !== false;
             state.autoPauseReady = [];
             state.bufferingMembers = [];
             state.bufferPause = null;
@@ -1318,7 +1324,10 @@ function handleRoomEvent(message) {
         )
             ? message.payload.pauseOnBufferDelay
             : 5;
+        state.autoCorrectionEnabled =
+            message.payload?.autoCorrectionEnabled !== false;
         sendBufferingSettings();
+        sendRoomTabState();
         if (state.role === 'host' && !state.pauseOnBuffer) {
             updateBufferingMember(state.clientId, false);
         }
@@ -1867,8 +1876,8 @@ function hostPageDetected(tabId, candidate) {
     }
 
     publish();
-    // 暂时关闭“发现新视频时询问是否分享”的弹窗。
-    // 保留这段调用，之后需要恢复提示时可以取消注释。
+    // Temporarily disable the prompt asking whether to share a newly detected video.
+    // Keep this call so the prompt can be restored by uncommenting it later.
     /*
     sendTab(
         {
@@ -2175,6 +2184,17 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 (message.snapshot ||
                     (isManualControlAction &&
                         message.videoState?.manualControl !== true))
+            ) {
+                return;
+            }
+
+            // Host playback events without a nearby user gesture can come from
+            // the site's player logic. Keep those from causing room-wide flicker.
+            if (
+                state.role === 'host' &&
+                !message.snapshot &&
+                isManualControlAction &&
+                message.videoState?.manualControl !== true
             ) {
                 return;
             }
@@ -2499,6 +2519,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 autoPause: state.autoPause,
                 pauseOnBuffer: state.pauseOnBuffer,
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
+                autoCorrectionEnabled: state.autoCorrectionEnabled,
             });
             if (state.autoPause.enabled && !wasEnabled) {
                 startAutoPauseWhenReady();
@@ -2523,6 +2544,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     autoPause: state.autoPause,
                     pauseOnBuffer: state.pauseOnBuffer,
                     pauseOnBufferDelay: state.pauseOnBufferDelay,
+                    autoCorrectionEnabled: state.autoCorrectionEnabled,
                 });
                 return;
             }
@@ -2538,6 +2560,21 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 settings: {
                     pauseOnBufferEnabled: settings.pauseOnBufferEnabled,
                 },
+            });
+            return;
+        }
+
+        if (message.type === 'SET_AUTO_CORRECTION' && state.connected) {
+            if (state.role !== 'host') return;
+
+            state.autoCorrectionEnabled = message.enabled === true;
+            sendRoomTabState();
+            publish();
+            sendRoomEvent('room-settings', {
+                autoPause: state.autoPause,
+                pauseOnBuffer: state.pauseOnBuffer,
+                pauseOnBufferDelay: state.pauseOnBufferDelay,
+                autoCorrectionEnabled: state.autoCorrectionEnabled,
             });
             return;
         }
@@ -2659,6 +2696,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
             state.currentPlayback = null;
             state.liveVideo = false;
+            state.autoCorrectionEnabled = true;
 
             const frame = selectVideoFrame(
                 state.tabId,
@@ -2730,6 +2768,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.currentVideoUrl = tab?.url || '';
             state.currentPlayback = null;
             state.liveVideo = false;
+            state.autoCorrectionEnabled = true;
 
             const frame = selectVideoFrame(
                 state.tabId,
@@ -2775,6 +2814,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.room = '';
             state.role = '';
             state.liveVideo = false;
+            state.autoCorrectionEnabled = true;
             state.autoShare = false;
             state.clientId = '';
             state.hostClientId = '';

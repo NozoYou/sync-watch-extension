@@ -40,6 +40,8 @@
     let role = '';
     let lastPlaybackKeyAt = 0;
     let lastPointerControlAt = 0;
+    let manualSeekExpiresAt = 0;
+    let autoCorrectionEnabled = true;
     let waitingForRoomPlayback = false;
     let autoPauseTimer = null;
     let lastAutoPauseId = '';
@@ -181,8 +183,6 @@
     }
 
     function hasRecentPlaybackIntent() {
-        if (role === 'host') return true;
-
         const now = Date.now();
         const pointerIntent =
             activeControlPointers.size > 0 || now - lastPointerControlAt < 900;
@@ -260,11 +260,19 @@
             'seeked',
             'ratechange',
         ].includes(action);
+        const now = Date.now();
+        const hasRecentIntent = hasRecentPlaybackIntent();
+        if (action === 'seeking') {
+            // Keep the final seek event trusted even if buffering delays it.
+            manualSeekExpiresAt = hasRecentIntent ? now + 10_000 : 0;
+        }
         const manualControl =
-            isPlaybackControl && hasRecentPlaybackIntent();
+            isPlaybackControl &&
+            (hasRecentIntent ||
+                (action === 'seeked' && now < manualSeekExpiresAt));
+        if (action === 'seeked') manualSeekExpiresAt = 0;
         if (role !== 'host' && isPlaybackControl && !manualControl) return;
 
-        const now = Date.now();
         const isSeeking = action === 'seeking';
 
         // Limit frequent seek and playback-clock messages on busy players.
@@ -493,7 +501,7 @@
             .catch(() => {});
     }
 
-    // ===== 调试：周期进度校准。与手动播放、暂停、拖动进度分开处理。 =====
+    // ===== DEBUG: Periodic playback correction, separate from manual controls. =====
     const periodicCorrectionSettings = {
         // Small clock drift is left alone to avoid visible rewind/forward jumps.
         // Manual seek actions use the explicit-control path below, independent of this threshold.
@@ -535,6 +543,7 @@
             currentVideo.seeking ||
             currentVideo.paused ||
             remoteState.paused ||
+            !autoCorrectionEnabled ||
             currentVideo.readyState < HTMLMediaElement.HAVE_FUTURE_DATA ||
             now < candidate.settlingUntil ||
             Math.abs(drift) <= periodicCorrectionSettings.driftThreshold
@@ -582,7 +591,7 @@
         resetPeriodicCorrection(currentVideo, true);
         return true;
     }
-    // ===== 调试：周期进度校准结束。 =====
+    // ===== DEBUG: End of periodic playback correction. =====
 
     async function applyVideo(remoteState) {
         const currentVideo = chooseVideo();
@@ -597,7 +606,7 @@
             : Math.min(Math.max(0, (Date.now() - remoteState.at) / 1000), 1.5);
         const targetTime = (remoteState.time || 0) + elapsed;
 
-        // 原始校准代码：注释保留，便于对照和后续调试。
+        // Keep the original correction code commented out for reference and debugging.
         /*
         if (Math.abs(targetTime - currentVideo.currentTime) > 0.8) {
             const seekTo = Math.max(0, targetTime);
@@ -951,6 +960,7 @@
             if (currentVideo) sendVideo(currentVideo, 'snapshot', true);
         } else if (message.type === 'ROOM_CONNECTED') {
             role = message.role || '';
+            autoCorrectionEnabled = message.autoCorrectionEnabled !== false;
             bufferingDelaySeconds = [3, 5].includes(message.bufferingDelay)
                 ? message.bufferingDelay
                 : 5;

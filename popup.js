@@ -344,9 +344,13 @@ function renderRoomMemberList(state) {
 function renderInjectionDebug(state) {
     const panel = getElement('injection-debug');
     const list = getElement('injection-debug-list');
+    const disableAutoCorrection = getElement('disable-auto-correction');
 
     panel.classList.toggle('hidden', state.role !== 'host');
     if (state.role !== 'host') return;
+
+    disableAutoCorrection.checked = state.autoCorrectionEnabled === false;
+    disableAutoCorrection.disabled = !state.connected;
 
     list.replaceChildren();
 
@@ -830,6 +834,7 @@ chrome.storage.local.get(
         'autoPause',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
+        'autoCorrectionEnabled',
         'modifyTabIcon',
         'autoReinjectSamePage',
         'hasSeenFollowPrompt',
@@ -960,6 +965,13 @@ getElement('pause-on-buffer-duration').addEventListener('change', () => {
         type: 'SET_PAUSE_ON_BUFFER',
         enabled: getElement('pause-on-buffer').checked,
         delay: Number(getElement('pause-on-buffer-duration').value),
+    });
+});
+
+getElement('disable-auto-correction').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_CORRECTION',
+        enabled: !getElement('disable-auto-correction').checked,
     });
 });
 
