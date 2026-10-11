@@ -57,6 +57,7 @@ const state = {
     bufferPause: null,
     currentVideoUrl: '',
     currentPlayback: null,
+    liveVideo: false,
     savedProgress: [],
     pendingNavigation: null,
     sharedNavigation: null,
@@ -103,6 +104,7 @@ const ready = chrome.storage.local
         'bufferPause',
         'currentVideoUrl',
         'currentPlayback',
+        'liveVideo',
         'savedProgress',
         'pendingNavigation',
         'sharedNavigation',
@@ -160,6 +162,7 @@ function persist() {
         bufferPause: state.bufferPause,
         currentVideoUrl: state.currentVideoUrl,
         currentPlayback: state.currentPlayback,
+        liveVideo: state.liveVideo,
         savedProgress: state.savedProgress,
         pendingNavigation: state.pendingNavigation,
         sharedNavigation: state.sharedNavigation,
@@ -1048,6 +1051,7 @@ async function connectRoom() {
             state.autoPauseReady = [];
             state.bufferingMembers = [];
             state.bufferPause = null;
+            state.liveVideo = message.liveVideo === true;
 
             if (state.role === 'host') {
                 if (message.sharedNavigation) {
@@ -1074,7 +1078,9 @@ async function connectRoom() {
 
             if (state.role !== 'host') state.followingHost = true;
 
-            if (
+            if (state.liveVideo) {
+                setStatus('房主正在播放直播，直播内容不同步。');
+            } else if (
                 requestedRoomLimit &&
                 requestedRoomLimit > state.roomLimit
             ) {
@@ -1217,6 +1223,16 @@ async function connectRoom() {
 }
 
 function handleRoomEvent(message) {
+    if (message.event === 'live-status' && message.from === state.hostClientId) {
+        state.liveVideo = message.payload?.isLive === true;
+        state.currentPlayback = null;
+        state.status = state.liveVideo
+            ? '房主正在播放直播，直播内容不同步。'
+            : '直播已结束，恢复视频同步。';
+        publish();
+        return;
+    }
+
     if (message.event === 'video-recommendation') {
         if (state.role !== 'host' || !message.payload?.id) return;
 
@@ -1694,6 +1710,10 @@ function shareHostPage(candidate, { requireVideo = false } = {}) {
     sendTab({ type: 'HIDE_ROOM_PROMPT' }, 0, candidate.tabId);
     state.currentVideoUrl = url;
     state.currentPlayback = null;
+    if (state.liveVideo) {
+        state.liveVideo = false;
+        sendRoomEvent('live-status', { isLive: false });
+    }
     state.sharedNavigation = {
         id: crypto.randomUUID(),
         url,
@@ -2120,6 +2140,22 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 (state.role === 'host' && !state.videoReady)
             ) {
                 return;
+            }
+
+            if (message.videoState?.isLive === true) {
+                if (state.role === 'host' && !state.liveVideo) {
+                    state.liveVideo = true;
+                    state.currentPlayback = null;
+                    state.status = '检测到直播，直播内容不同步。';
+                    sendRoomEvent('live-status', { isLive: true });
+                    publish();
+                }
+                return;
+            }
+
+            if (state.role === 'host' && state.liveVideo) {
+                state.liveVideo = false;
+                sendRoomEvent('live-status', { isLive: false });
             }
 
             const action = message.videoState?.action;
@@ -2622,6 +2658,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
             state.currentPlayback = null;
+            state.liveVideo = false;
 
             const frame = selectVideoFrame(
                 state.tabId,
@@ -2692,6 +2729,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const tab = await chrome.tabs.get(message.tabId).catch(() => null);
             state.currentVideoUrl = tab?.url || '';
             state.currentPlayback = null;
+            state.liveVideo = false;
 
             const frame = selectVideoFrame(
                 state.tabId,
@@ -2736,6 +2774,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             sendTab({ type: 'ROOM_STOP' });
             state.room = '';
             state.role = '';
+            state.liveVideo = false;
             state.autoShare = false;
             state.clientId = '';
             state.hostClientId = '';

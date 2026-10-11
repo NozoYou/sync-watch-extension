@@ -98,6 +98,7 @@
             duration: Number.isFinite(currentVideo.duration)
                 ? currentVideo.duration
                 : 0,
+            isLive: isLiveVideo(currentVideo),
             paused: currentVideo.paused,
             rate: currentVideo.playbackRate,
             at: Date.now(),
@@ -107,6 +108,16 @@
                 '',
             ),
         };
+    }
+
+    function isLiveVideo(currentVideo) {
+        // Native media streams commonly expose Infinity for a live duration.
+        if (currentVideo.duration === Infinity) return true;
+
+        // Some sites hide live-stream duration behind a custom media player.
+        return /(?:^|\/)(?:live|livestream|live-stream)(?:\/|$)/i.test(
+            location.pathname,
+        );
     }
 
     function isInsideVideoArea(event, currentVideo) {

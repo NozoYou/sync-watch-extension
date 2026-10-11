@@ -197,6 +197,7 @@ webSocketServer.on('connection', (webSocket) => {
                     ),
                 );
                 room.sharedNavigation = null;
+                room.liveVideo = false;
                 room.navigationHistory = [];
                 room.autoPause = { enabled: false, duration: 5 };
                 room.pauseOnBuffer = false;
@@ -271,6 +272,7 @@ webSocketServer.on('connection', (webSocket) => {
                     peers: existingMembers,
                     limit: room.limit,
                     sharedNavigation: room.sharedNavigation,
+                    liveVideo: room.liveVideo,
                     navigationHistory: room.navigationHistory,
                     autoPause: room.autoPause,
                     pauseOnBuffer: room.pauseOnBuffer,
@@ -322,6 +324,7 @@ webSocketServer.on('connection', (webSocket) => {
         if (message.type === 'room-event' && webSocket.room) {
             const allowedEvents = new Set([
                 'video',
+                'live-status',
                 'navigate',
                 'follow-response',
                 'snapshot-request',
@@ -348,6 +351,8 @@ webSocketServer.on('connection', (webSocket) => {
                 return;
             }
 
+            const room = rooms.get(webSocket.room);
+
             if (message.event === 'navigate') {
                 try {
                     const url = new URL(message.payload.url);
@@ -355,6 +360,18 @@ webSocketServer.on('connection', (webSocket) => {
                 } catch {
                     return;
                 }
+            }
+
+            if (message.event === 'live-status') {
+                if (
+                    webSocket.clientId !== room?.hostClientId ||
+                    typeof message.payload.isLive !== 'boolean'
+                ) {
+                    return;
+                }
+
+                room.liveVideo = message.payload.isLive;
+                message.payload = { isLive: room.liveVideo };
             }
 
             if (message.event === 'injection-status') {
@@ -380,8 +397,6 @@ webSocketServer.on('connection', (webSocket) => {
                     refreshError: String(status.refreshError || '').slice(0, 160),
                 };
             }
-
-            const room = rooms.get(webSocket.room);
 
             if (message.event === 'refresh-member-injection') {
                 const targetClientId = String(
