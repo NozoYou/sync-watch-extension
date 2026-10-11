@@ -888,10 +888,15 @@ getElement('auto-follow').addEventListener('change', () => {
     });
 });
 
-getElement('auto-share').addEventListener('change', () => {
+getElement('auto-share').addEventListener('change', async () => {
+    const activeTab = getElement('auto-share').checked
+        ? await getActiveTab()
+        : null;
+
     chrome.runtime.sendMessage({
         type: 'SET_AUTO_SHARE',
         enabled: getElement('auto-share').checked,
+        tabId: activeTab?.id,
     });
 });
 

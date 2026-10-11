@@ -1718,6 +1718,10 @@ async function shareCurrentPage(tabId) {
 function hostPageDetected(tabId, candidate) {
     if (state.role !== 'host' || !state.room || !candidate?.hasVideo) return;
 
+    // Auto-share follows videos only within the tab that was explicitly bound.
+    // A different tab becomes the room tab only after a manual share action.
+    if (state.autoShare && tabId !== state.tabId) return;
+
     const pageUrl = safePageUrl(candidate.pageUrl);
     if (!pageUrl) return;
 
@@ -2194,13 +2198,29 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
         if (message.type === 'SET_AUTO_SHARE' && state.role === 'host') {
             state.autoShare = !!message.enabled;
-            publish();
 
-            // If a new video is already awaiting confirmation, enabling
-            // automatic sharing applies to that pending page too.
-            if (state.autoShare && state.hostCandidate) {
-                shareHostPage(state.hostCandidate, { requireVideo: true });
+            if (state.autoShare) {
+                const requestedTabId = Number(message.tabId);
+                const tabId = Number.isInteger(requestedTabId)
+                    ? requestedTabId
+                    : state.tabId;
+
+                // Enabling auto-share binds only the tab active in the popup.
+                if (Number.isInteger(tabId)) {
+                    switchRoomTab(tabId);
+                    state.hostCandidate = null;
+
+                    const candidate = bestVideoFrame(tabId);
+                    if (candidate?.hasVideo) {
+                        hostPageDetected(tabId, candidate);
+                    } else {
+                        state.status =
+                            '自动分享已开启，仅绑定当前标签页；切换到其他标签页后请手动分享。';
+                    }
+                }
             }
+
+            publish();
             return;
         }
 
