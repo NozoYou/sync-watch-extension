@@ -445,6 +445,95 @@
             .catch(() => {});
     }
 
+    // ===== 调试：周期进度校准。与手动播放、暂停、拖动进度分开处理。 =====
+    const periodicCorrectionSettings = {
+        driftThreshold: 0.8,
+        requiredSamples: 3,
+        observationMs: 1400,
+        maximumSampleGapMs: 2500,
+        settlingMs: 1500,
+    };
+    const periodicCorrections = new WeakMap();
+
+    function resetPeriodicCorrection(currentVideo, waitForSettling = false) {
+        const previous = periodicCorrections.get(currentVideo);
+        const settlingUntil = waitForSettling
+            ? performance.now() + periodicCorrectionSettings.settlingMs
+            : previous?.settlingUntil || 0;
+
+        periodicCorrections.set(currentVideo, {
+            direction: 0,
+            samples: 0,
+            firstSampleAt: 0,
+            lastSampleAt: 0,
+            settlingUntil,
+        });
+    }
+
+    function shouldCorrectPeriodicPlayback(currentVideo, remoteState, targetTime) {
+        if (!periodicCorrections.has(currentVideo)) {
+            resetPeriodicCorrection(currentVideo);
+        }
+
+        const candidate = periodicCorrections.get(currentVideo);
+        // Only compare elapsed time within this browser; do not compare this
+        // observation window with the host computer's system clock.
+        const now = performance.now();
+        const drift = targetTime - currentVideo.currentTime;
+
+        if (
+            currentVideo.seeking ||
+            currentVideo.paused ||
+            remoteState.paused ||
+            currentVideo.readyState < HTMLMediaElement.HAVE_FUTURE_DATA ||
+            now < candidate.settlingUntil ||
+            Math.abs(drift) <= periodicCorrectionSettings.driftThreshold
+        ) {
+            resetPeriodicCorrection(currentVideo);
+            return false;
+        }
+
+        const direction = Math.sign(drift);
+        const sampleGap = now - candidate.lastSampleAt;
+
+        // A small/normal sample, a direction change, or a long gap breaks the
+        // streak. One delayed message must not force the player to seek.
+        if (
+            direction !== candidate.direction ||
+            sampleGap > periodicCorrectionSettings.maximumSampleGapMs
+        ) {
+            candidate.direction = direction;
+            candidate.samples = 1;
+            candidate.firstSampleAt = now;
+        } else {
+            candidate.samples += 1;
+        }
+        candidate.lastSampleAt = now;
+
+        if (
+            candidate.samples < periodicCorrectionSettings.requiredSamples ||
+            now - candidate.firstSampleAt < periodicCorrectionSettings.observationMs
+        ) {
+            return false;
+        }
+
+        console.debug('[一起看][调试] 周期进度校准', {
+            action: remoteState.action,
+            videoBindingId,
+            currentTime: currentVideo.currentTime,
+            targetTime,
+            drift,
+            samples: candidate.samples,
+            observationMs: now - candidate.firstSampleAt,
+        });
+
+        // Wait for the seek and the player's clock to settle before collecting
+        // a fresh streak. Explicit room controls can still supersede it.
+        resetPeriodicCorrection(currentVideo, true);
+        return true;
+    }
+    // ===== 调试：周期进度校准结束。 =====
+
     async function applyVideo(remoteState) {
         const currentVideo = chooseVideo();
         if (!remoteState || !currentVideo) return;
@@ -458,7 +547,23 @@
             : Math.min(Math.max(0, (Date.now() - remoteState.at) / 1000), 1.5);
         const targetTime = (remoteState.time || 0) + elapsed;
 
+        // 原始校准代码：注释保留，便于对照和后续调试。
+        /*
         if (Math.abs(targetTime - currentVideo.currentTime) > 0.8) {
+            const seekTo = Math.max(0, targetTime);
+            expectMediaEvent(currentVideo, 'time', seekTo);
+            currentVideo.currentTime = seekTo;
+        }
+        */
+
+        const isPeriodicUpdate = remoteState.action === 'time';
+        if (!isPeriodicUpdate) resetPeriodicCorrection(currentVideo, true);
+
+        const shouldSeek = isPeriodicUpdate
+            ? shouldCorrectPeriodicPlayback(currentVideo, remoteState, targetTime)
+            : Math.abs(targetTime - currentVideo.currentTime) > 0.8;
+
+        if (shouldSeek) {
             const seekTo = Math.max(0, targetTime);
             expectMediaEvent(currentVideo, 'time', seekTo);
             currentVideo.currentTime = seekTo;
