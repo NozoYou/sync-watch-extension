@@ -75,7 +75,36 @@ webSocketServer.on('connection', (webSocket) => {
 
         if (message.type === 'ping') {
             if (webSocket.readyState === WebSocket.OPEN) {
-                webSocket.send(JSON.stringify({ type: 'pong' }));
+                webSocket.send(
+                    JSON.stringify({ type: 'pong', pingId: message.pingId }),
+                );
+            }
+            return;
+        }
+
+        if (message.type === 'latency-report' && webSocket.room) {
+            const room = rooms.get(webSocket.room);
+            const rttMs = Number(message.rttMs);
+
+            if (
+                !room ||
+                room.get(webSocket.clientId) !== webSocket ||
+                !Number.isFinite(rttMs) ||
+                rttMs < 0 ||
+                rttMs > 60_000
+            ) {
+                return;
+            }
+
+            room.memberLatency.set(webSocket.clientId, Math.round(rttMs));
+            const update = JSON.stringify({
+                type: 'latency-update',
+                clientId: webSocket.clientId,
+                rttMs: Math.round(rttMs),
+            });
+
+            for (const peer of room.values()) {
+                if (peer.readyState === WebSocket.OPEN) peer.send(update);
             }
             return;
         }
@@ -128,6 +157,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.hostClientId = null;
                 room.memberSettings = new Map();
                 room.memberNames = new Map();
+                room.memberLatency = new Map();
                 room.recommendations = [];
                 room.recommendationRateLimits = new Map();
                 rooms.set(roomId, room);
@@ -201,6 +231,7 @@ webSocketServer.on('connection', (webSocket) => {
                     hostClientId: room.hostClientId,
                     memberSettings: Object.fromEntries(room.memberSettings),
                     memberNames: Object.fromEntries(room.memberNames),
+                    memberLatency: Object.fromEntries(room.memberLatency),
                     recommendations: room.recommendations || [],
                 }),
             );
@@ -749,7 +780,10 @@ webSocketServer.on('connection', (webSocket) => {
         const isCurrentConnection = room?.get(webSocket.clientId) === webSocket;
 
         // An older socket may close after a reconnect has already replaced it.
-        if (isCurrentConnection) room.delete(webSocket.clientId);
+        if (isCurrentConnection) {
+            room.delete(webSocket.clientId);
+            room.memberLatency.delete(webSocket.clientId);
+        }
 
         if (room && isCurrentConnection) {
             for (const peer of room.values()) {

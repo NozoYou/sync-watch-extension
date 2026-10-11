@@ -617,8 +617,32 @@
                 : requestedTime;
 
             bind(currentVideo);
-            currentVideo.pause();
+            if (!currentVideo.paused) {
+                expectMediaEvent(currentVideo, 'paused', true);
+                currentVideo.pause();
+            }
+
+            // Restoring a local bookmark must not seek the shared room.
+            expectMediaEvent(currentVideo, 'time', targetTime);
             currentVideo.currentTime = targetTime;
+
+            if (!currentVideo.paused) {
+                expectMediaEvent(currentVideo, 'paused', true);
+                currentVideo.pause();
+            }
+
+            // Keep the saved page paused even if seeking triggers player logic.
+            currentVideo.addEventListener(
+                'seeked',
+                () => {
+                    if (!currentVideo.paused) {
+                        expectMediaEvent(currentVideo, 'paused', true);
+                        currentVideo.pause();
+                    }
+                },
+                { once: true },
+            );
+
             return true;
         };
 

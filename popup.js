@@ -40,6 +40,7 @@ function formatPlaybackTime(seconds) {
 
 function renderPlaybackProgress() {
     const panel = getElement('room-playback');
+    const area = getElement('room-playback-area');
     const videoUrl = safeHistoryUrl(
         lastRenderedState?.sharedNavigation?.url || currentPlayback?.url,
     );
@@ -50,11 +51,11 @@ function renderPlaybackProgress() {
     panel.title = videoUrl ? '点击在当前标签页打开房间正在播放的视频' : '';
 
     if (!currentPlayback) {
-        panel.classList.add('hidden');
+        area.classList.add('hidden');
         return;
     }
 
-    panel.classList.remove('hidden');
+    area.classList.remove('hidden');
     getElement('room-playback-title').textContent =
         currentPlayback.title || '当前视频';
     getElement('room-playback-status').textContent = currentPlayback.paused
@@ -118,16 +119,21 @@ function renderSavedProgress(state) {
 
         const actions = document.createElement('div');
         actions.className = 'saved-progress-actions';
-        const openButton = document.createElement('button');
-        openButton.className = 'quiet';
-        openButton.type = 'button';
-        openButton.textContent = '打开';
-        openButton.title = '在新标签页打开并定位到保存进度';
-        openButton.addEventListener('click', () => {
+        details.classList.add('is-openable');
+        details.setAttribute('role', 'link');
+        details.tabIndex = 0;
+        details.title = '打开视频并跳转到保存的进度，视频将保持暂停';
+        const openSavedItem = () => {
             chrome.runtime.sendMessage({
                 type: 'OPEN_SAVED_PROGRESS',
                 id: item.id,
             });
+        };
+        details.addEventListener('click', openSavedItem);
+        details.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openSavedItem();
         });
 
         const removeButton = document.createElement('button');
@@ -142,7 +148,7 @@ function renderSavedProgress(state) {
             });
         });
 
-        actions.append(openButton, removeButton);
+        actions.append(removeButton);
         row.append(details, actions);
         list.append(row);
     }
@@ -301,8 +307,34 @@ function renderRoomMemberList(state) {
         const chip = document.createElement('span');
         chip.className = 'room-member-chip';
         const isHost = clientId === state.hostClientId;
-        chip.textContent = `${getMemberDisplayName(state, clientId, index)}${isHost ? ' · 房主' : ''}`;
-        chip.title = clientId;
+        const displayName = getMemberDisplayName(state, clientId, index);
+        const latency = state.memberLatency?.[clientId];
+        const indicator = document.createElement('span');
+        indicator.className = 'room-member-latency';
+
+        if (Number.isFinite(latency)) {
+            // Thresholds classify the measured server round trip for a quick glance.
+            indicator.classList.add(
+                latency < 150
+                    ? 'is-good'
+                    : latency < 300
+                      ? 'is-medium'
+                      : 'is-poor',
+            );
+            chip.title = `到信令服务器的往返延迟：${latency} ms`;
+            chip.setAttribute(
+                'aria-label',
+                `${displayName}，延迟 ${latency} 毫秒`,
+            );
+        } else {
+            indicator.classList.add('is-pending');
+            chip.title = '正在测量到信令服务器的往返延迟';
+        }
+
+        const name = document.createElement('span');
+        name.className = 'room-member-name';
+        name.textContent = `${displayName}${isHost ? ' · 房主' : ''}`;
+        chip.append(indicator, name);
         list.append(chip);
     }
 }
@@ -671,6 +703,9 @@ function render(state) {
         getElement('room-connection').textContent = state.connected
             ? '已连接'
             : '连接中 / 正在重连';
+        const hostName = state.memberNames?.[state.hostClientId];
+        getElement('room-host-name').textContent =
+            state.connected && hostName ? ` · 房主：${hostName}` : '';
         getElement('room-members').textContent =
             `房间人数：${state.memberCount || 0}/${state.roomLimit || 4}`;
         renderRoomMemberList(state);
@@ -743,7 +778,8 @@ function render(state) {
     } else {
         getElement('room-box').classList.add('hidden');
         getElement('room-member-list').replaceChildren();
-        getElement('room-playback').classList.add('hidden');
+        getElement('room-playback-area').classList.add('hidden');
+        getElement('room-host-name').textContent = '';
         getElement('member-follow-settings').classList.add('hidden');
         getElement('host-sharing-settings').classList.add('hidden');
         getElement('auto-share').checked = false;
@@ -808,6 +844,7 @@ chrome.storage.local.get(
         'autoShare',
         'memberInjectionStatus',
         'memberNames',
+        'memberLatency',
     ],
     render,
 );

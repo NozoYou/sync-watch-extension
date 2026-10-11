@@ -90,9 +90,6 @@
         <details id="saved-progress-panel" class="saved-progress-panel hidden">
             <summary id="saved-progress-summary">本地保存的进度</summary>
             <div class="saved-progress-content">
-                <button id="save-current-progress" class="quiet" type="button">
-                    保存当前进度
-                </button>
                 <p id="saved-progress-empty" class="small hidden">
                     保存的进度只保存在本机扩展中。
                 </p>
@@ -263,34 +260,46 @@
             </div>
 
             <div class="room-meta">
-                <span id="room-connection">正在连接服务器…</span>
+                <span class="room-connection-group">
+                    <span id="room-connection">正在连接服务器…</span>
+                    <span id="room-host-name"></span>
+                </span>
                 <span id="room-members">房间人数：—</span>
             </div>
 
-            <div id="room-member-list" class="room-member-list" aria-label="房间成员"></div>
-
             <!-- Shows the host's current shared title and playback position. -->
-            <section
-                id="room-playback"
-                class="room-playback hidden"
-                role="button"
-                tabindex="-1"
-                aria-disabled="true"
-            >
-                <div class="room-playback-heading">
-                    <strong id="room-playback-title">等待视频状态…</strong>
-                    <span id="room-playback-status">—</span>
-                </div>
-                <progress
-                    id="room-playback-progress"
-                    max="100"
-                    value="0"
-                ></progress>
-                <div class="room-playback-time">
-                    <span id="room-playback-current">0:00</span>
-                    <span id="room-playback-duration">—</span>
-                </div>
-            </section>
+            <div id="room-playback-area" class="room-playback-area hidden">
+                <section
+                    id="room-playback"
+                    class="room-playback"
+                    role="button"
+                    tabindex="-1"
+                    aria-disabled="true"
+                >
+                    <div class="room-playback-heading">
+                        <strong id="room-playback-title">等待视频状态…</strong>
+                        <span id="room-playback-status">—</span>
+                    </div>
+                    <progress
+                        id="room-playback-progress"
+                        max="100"
+                        value="0"
+                    ></progress>
+                    <div class="room-playback-time">
+                        <span id="room-playback-current">0:00</span>
+                        <span id="room-playback-duration">—</span>
+                    </div>
+                </section>
+                <button
+                    id="save-current-progress"
+                    class="quiet room-playback-save"
+                    type="button"
+                >
+                    保存进度
+                </button>
+            </div>
+
+            <div id="room-member-list" class="room-member-list" aria-label="房间成员"></div>
 
         </section>
 

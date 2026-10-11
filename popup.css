@@ -363,6 +363,13 @@ button:hover {
     font-size: 11px;
 }
 
+.room-connection-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 3px;
+}
+
 .member-follow-settings {
     display: grid;
     gap: 7px;
@@ -380,6 +387,9 @@ button:hover {
 }
 
 .room-member-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     max-width: 100%;
     padding: 3px 7px;
     border: 1px solid #363a53;
@@ -390,8 +400,39 @@ button:hover {
     overflow-wrap: anywhere;
 }
 
-.room-playback {
+.room-member-name {
+    min-width: 0;
+}
+
+.room-member-latency {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 50%;
+    background: #9298a8;
+}
+
+.room-member-latency.is-good {
+    background: #42c777;
+}
+
+.room-member-latency.is-medium {
+    background: #f0bd43;
+}
+
+.room-member-latency.is-poor {
+    background: #f06464;
+}
+
+.room-member-latency.is-pending {
+    background: #9298a8;
+}
+
+.room-playback-area {
     margin-top: 9px;
+}
+
+.room-playback {
     padding: 8px 9px;
     border-radius: 7px;
     background: #22243a;
@@ -405,6 +446,19 @@ button:hover {
 .room-playback.is-openable:focus-visible {
     outline: 1px solid #7766f5;
     background: #292b43;
+}
+
+.room-playback-save {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    padding: 6px 8px;
+    font-size: 10px;
+}
+
+.room-playback-save:disabled {
+    cursor: default;
+    opacity: 0.5;
 }
 
 .room-playback-heading,
@@ -491,15 +545,6 @@ button:hover {
     padding-top: 7px;
 }
 
-.saved-progress-content > #save-current-progress {
-    width: 100%;
-}
-
-.saved-progress-content > #save-current-progress:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
 .saved-progress-item {
     display: flex;
     align-items: center;
@@ -513,6 +558,20 @@ button:hover {
 .saved-progress-details {
     min-width: 0;
     flex: 1;
+}
+
+.saved-progress-details.is-openable {
+    cursor: pointer;
+}
+
+.saved-progress-details.is-openable:hover strong {
+    color: #c5befc;
+    text-decoration: underline;
+}
+
+.saved-progress-details.is-openable:focus-visible {
+    outline: 1px solid #7766f5;
+    border-radius: 4px;
 }
 
 .saved-progress-details strong,

@@ -3,6 +3,8 @@
 let socket = null;
 let pingTimer = null;
 let reconnectTimer = null;
+let nextPingId = 0;
+const pendingLatencyPings = new Map();
 
 const videoFrames = new Map();
 const injectionFrames = new Map();
@@ -40,6 +42,7 @@ const state = {
     followPromptEnabled: true,
     members: [],
     memberNames: {},
+    memberLatency: {},
     memberSettings: {},
     memberInjectionStatus: {},
     navigationHistory: [],
@@ -85,6 +88,7 @@ const ready = chrome.storage.local
         'followPromptEnabled',
         'members',
         'memberNames',
+        'memberLatency',
         'memberSettings',
         'memberInjectionStatus',
         'navigationHistory',
@@ -141,6 +145,7 @@ function persist() {
         followPromptEnabled: state.followPromptEnabled,
         members: state.members,
         memberNames: state.memberNames,
+        memberLatency: state.memberLatency,
         memberSettings: state.memberSettings,
         memberInjectionStatus: state.memberInjectionStatus,
         navigationHistory: state.navigationHistory,
@@ -831,6 +836,7 @@ function selectVideoFrame(tabId, pageUrl = '') {
 
 function disconnectSocket() {
     clearInterval(pingTimer);
+    pendingLatencyPings.clear();
     clearTimeout(reconnectTimer);
 
     if (!socket) return;
@@ -940,9 +946,19 @@ async function connectRoom() {
         setStatus('正在连接房间…');
         pingTimer = setInterval(() => {
             if (socket?.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'ping' }));
+                // Measure a server round trip; the server shares the result with the room.
+                const startedAt = performance.now();
+                for (const [pendingId, pendingAt] of pendingLatencyPings) {
+                    if (startedAt - pendingAt > 15_000) {
+                        pendingLatencyPings.delete(pendingId);
+                    }
+                }
+
+                const pingId = ++nextPingId;
+                pendingLatencyPings.set(pingId, startedAt);
+                socket.send(JSON.stringify({ type: 'ping', pingId }));
             }
-        }, 20_000);
+        }, 5_000);
     };
 
     socket.onmessage = (event) => {
@@ -962,6 +978,7 @@ async function connectRoom() {
             state.roomLimit = message.limit || 4;
             state.members = [...(message.peers || []), message.clientId];
             state.memberNames = { ...(message.memberNames || {}) };
+            state.memberLatency = { ...(message.memberLatency || {}) };
             state.memberNames[state.clientId] =
                 state.memberNames[state.clientId] || state.displayName || '成员';
             state.memberSettings[state.clientId] = {
@@ -1075,6 +1092,28 @@ async function connectRoom() {
             return;
         }
 
+        if (message.type === 'pong') {
+            const startedAt = pendingLatencyPings.get(message.pingId);
+            if (startedAt === undefined) return;
+            pendingLatencyPings.delete(message.pingId);
+
+            const rttMs = Math.round(performance.now() - startedAt);
+            if (socket?.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'latency-report', rttMs }));
+            }
+            return;
+        }
+
+        if (message.type === 'latency-update') {
+            const clientId = String(message.clientId || '');
+            const rttMs = Number(message.rttMs);
+            if (!clientId || !Number.isFinite(rttMs)) return;
+
+            state.memberLatency[clientId] = rttMs;
+            publish();
+            return;
+        }
+
         if (message.type === 'recommendation-result') {
             state.recommendationStatus = message.message ||
                 (message.success ? '已推荐给房主。' : '推荐发送失败。');
@@ -1113,6 +1152,7 @@ async function connectRoom() {
             state.members = state.members.filter((id) => id !== message.clientId);
             delete state.memberInjectionStatus[message.clientId];
             delete state.memberNames[message.clientId];
+            delete state.memberLatency[message.clientId];
             state.bufferingMembers = state.bufferingMembers.filter(
                 (clientId) => clientId !== message.clientId,
             );
