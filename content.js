@@ -484,7 +484,9 @@
 
     // ===== 调试：周期进度校准。与手动播放、暂停、拖动进度分开处理。 =====
     const periodicCorrectionSettings = {
-        driftThreshold: 0.8,
+        // Small clock drift is left alone to avoid visible rewind/forward jumps.
+        // Manual seek actions use the explicit-control path below, independent of this threshold.
+        driftThreshold: 60,
         requiredSamples: 3,
         observationMs: 1400,
         maximumSampleGapMs: 2500,
