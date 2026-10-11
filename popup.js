@@ -58,11 +58,13 @@ function renderPlaybackProgress() {
     area.classList.remove('hidden');
     getElement('room-playback-title').textContent =
         currentPlayback.title || '当前视频';
-    getElement('room-playback-status').textContent = currentPlayback.paused
-        ? '已暂停'
-        : '播放中';
+    getElement('room-playback-status').textContent = currentPlayback.buffering
+        ? '缓冲中'
+        : currentPlayback.paused
+          ? '已暂停'
+          : '播放中';
 
-    const elapsed = currentPlayback.paused
+    const elapsed = currentPlayback.paused || currentPlayback.buffering
         ? currentPlayback.time
         : currentPlayback.time +
           Math.max(

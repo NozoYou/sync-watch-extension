@@ -11,6 +11,42 @@ const serverRoomLimit = Number.isInteger(configuredRoomLimit)
     ? Math.max(4, Math.min(16, configuredRoomLimit))
     : 16;
 const rooms = new Map();
+const latencyPingIntervalMs = 5_000;
+
+/** Measure a client's network round trip with WebSocket control frames. */
+function sendLatencyPing(webSocket) {
+    if (webSocket.readyState !== WebSocket.OPEN) return;
+
+    const now = Date.now();
+    for (const [pingId, sentAt] of webSocket.pendingLatencyPings) {
+        if (now - sentAt > 15_000) {
+            webSocket.pendingLatencyPings.delete(pingId);
+        }
+    }
+
+    // Keep only a few outstanding probes if a peer stops answering.
+    while (webSocket.pendingLatencyPings.size >= 3) {
+        const oldestPingId = webSocket.pendingLatencyPings.keys().next().value;
+        webSocket.pendingLatencyPings.delete(oldestPingId);
+    }
+
+    const pingId = randomUUID();
+    webSocket.pendingLatencyPings.set(pingId, now);
+    webSocket.ping(pingId);
+}
+
+function broadcastMemberLatency(room, clientId, rttMs) {
+    room.memberLatency.set(clientId, rttMs);
+    const update = JSON.stringify({
+        type: 'latency-update',
+        clientId,
+        rttMs,
+    });
+
+    for (const peer of room.values()) {
+        if (peer.readyState === WebSocket.OPEN) peer.send(update);
+    }
+}
 
 function defaultMemberSettings() {
     return {
@@ -63,6 +99,26 @@ server.on('upgrade', (request, socket, head) => {
 webSocketServer.on('connection', (webSocket) => {
     webSocket.clientId = randomUUID();
     webSocket.room = '';
+    webSocket.pendingLatencyPings = new Map();
+
+    // Browser WebSockets answer protocol pings automatically, even when an
+    // older extension build does not send application-level latency reports.
+    webSocket.on('pong', (payload) => {
+        const pingId = payload.toString();
+        const sentAt = webSocket.pendingLatencyPings.get(pingId);
+        if (sentAt === undefined) return;
+
+        webSocket.pendingLatencyPings.delete(pingId);
+        const room = rooms.get(webSocket.room);
+
+        if (!room || room.get(webSocket.clientId) !== webSocket) return;
+
+        broadcastMemberLatency(
+            room,
+            webSocket.clientId,
+            Math.max(0, Math.round(Date.now() - sentAt)),
+        );
+    });
 
     webSocket.on('message', (rawMessage) => {
         let message;
@@ -96,16 +152,7 @@ webSocketServer.on('connection', (webSocket) => {
                 return;
             }
 
-            room.memberLatency.set(webSocket.clientId, Math.round(rttMs));
-            const update = JSON.stringify({
-                type: 'latency-update',
-                clientId: webSocket.clientId,
-                rttMs: Math.round(rttMs),
-            });
-
-            for (const peer of room.values()) {
-                if (peer.readyState === WebSocket.OPEN) peer.send(update);
-            }
+            broadcastMemberLatency(room, webSocket.clientId, Math.round(rttMs));
             return;
         }
 
@@ -247,6 +294,7 @@ webSocketServer.on('connection', (webSocket) => {
                     );
                 }
             }
+            sendLatencyPing(webSocket);
             return;
         }
 
@@ -805,6 +853,14 @@ webSocketServer.on('connection', (webSocket) => {
     webSocket.on('close', removeMember);
     webSocket.on('error', removeMember);
 });
+
+// Probe every connected client so room members see latency even with older
+// extension versions that do not report application-level pings.
+setInterval(() => {
+    for (const webSocket of webSocketServer.clients) {
+        sendLatencyPing(webSocket);
+    }
+}, latencyPingIntervalMs);
 
 server.listen(port, '0.0.0.0', () => {
     console.log(

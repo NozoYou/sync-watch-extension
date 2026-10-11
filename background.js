@@ -207,7 +207,7 @@ function saveCurrentProgress() {
 
     const receivedAt =
         Number(playback.receivedAt) || Number(playback.at) || Date.now();
-    const time = playback.paused
+    const time = playback.paused || playback.buffering
         ? Number(playback.time) || 0
         : (Number(playback.time) || 0) +
           Math.max(0, (Date.now() - receivedAt) / 1000) *
@@ -753,8 +753,10 @@ function startBufferingPause() {
         resumePlayback: state.currentPlayback?.paused !== true,
     };
     state.bufferPause = payload;
+    updatePlaybackForBufferingControl(payload);
     sendTab({ type: 'BUFFERING_CONTROL', ...payload }, state.videoFrameId);
     sendRoomEvent('buffering-control', payload);
+    sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
     publish();
 }
 
@@ -766,14 +768,41 @@ function finishBufferingPause() {
         action: 'resume',
         pauseId: previousPause.pauseId,
         navigationId: previousPause.navigationId,
-        resumePlayback:
-            previousPause.resumePlayback && state.currentPlayback?.paused !== true,
+        resumePlayback: previousPause.resumePlayback,
     };
 
     state.bufferPause = null;
+    updatePlaybackForBufferingControl(payload);
     sendTab({ type: 'BUFFERING_CONTROL', ...payload }, state.videoFrameId);
     sendRoomEvent('buffering-control', payload);
+    sendTab({ type: 'GET_VIDEO_SNAPSHOT' }, state.videoFrameId);
     publish();
+}
+
+function updatePlaybackForBufferingControl(control) {
+    const playback = state.currentPlayback;
+    if (!playback) return;
+
+    const now = Date.now();
+    const receivedAt =
+        Number(playback.receivedAt) || Number(playback.at) || now;
+    const elapsed = playback.paused || playback.buffering
+        ? 0
+        : Math.max(0, (now - receivedAt) / 1000) * (playback.rate || 1);
+    const paused =
+        control.action !== 'resume' || control.resumePlayback !== true;
+
+    // Freeze the popup clock at the pause moment, then resume from that point.
+    state.currentPlayback = {
+        ...playback,
+        action: paused ? 'pause' : 'play',
+        time: (Number(playback.time) || 0) + elapsed,
+        paused,
+        buffering: false,
+        at: now,
+        receivedAt: now,
+        sourceClientId: state.hostClientId || state.clientId,
+    };
 }
 
 function updateBufferingMember(clientId, isBuffering) {
@@ -1308,6 +1337,8 @@ function handleRoomEvent(message) {
         message.payload?.navigationId === state.sharedNavigation?.id &&
         state.followingHost === true
     ) {
+        updatePlaybackForBufferingControl(message.payload);
+        publish();
         sendTab(
             { type: 'BUFFERING_CONTROL', ...message.payload },
             state.videoFrameId,
@@ -1492,6 +1523,18 @@ function handleRoomEvent(message) {
             const memberSettings = getMemberSettings(message.from);
             if (!canSendPlaybackAction(memberSettings, message.payload?.action)) {
                 return;
+            }
+        }
+
+        if (
+            state.role === 'host' &&
+            state.bufferPause &&
+            message.event === 'video'
+        ) {
+            if (message.payload?.action === 'pause') {
+                state.bufferPause.resumePlayback = false;
+            } else if (message.payload?.action === 'play') {
+                state.bufferPause.resumePlayback = true;
             }
         }
 

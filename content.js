@@ -57,6 +57,7 @@
     let bufferingCandidate = null;
     let bufferingDelaySeconds = 5;
     let bufferingReportingEnabled = false;
+    let playbackBufferingReported = false;
     const bufferingPauseStates = new WeakMap();
 
     const tabTitlePrefix = '[一起看] ';
@@ -280,6 +281,7 @@
         clearTimeout(bufferingTimer);
         bufferingTimer = null;
         bufferingCandidate = null;
+        playbackBufferingReported = false;
 
         video = currentVideo;
         videoBindingId += 1;
@@ -316,12 +318,28 @@
         );
         currentVideo.addEventListener(
             'waiting',
-            () => scheduleBufferingStatus(currentVideo),
+            () => {
+                scheduleBufferingStatus(currentVideo);
+                reportPlaybackBuffering(currentVideo, true);
+            },
             { passive: true, signal: pageEventController.signal },
         );
         currentVideo.addEventListener(
             'stalled',
-            () => scheduleBufferingStatus(currentVideo),
+            () => {
+                scheduleBufferingStatus(currentVideo);
+                reportPlaybackBuffering(currentVideo, true);
+            },
+            { passive: true, signal: pageEventController.signal },
+        );
+        currentVideo.addEventListener(
+            'error',
+            () => reportPlaybackBuffering(currentVideo, true),
+            { passive: true, signal: pageEventController.signal },
+        );
+        currentVideo.addEventListener(
+            'playing',
+            () => reportPlaybackBuffering(currentVideo, false),
             { passive: true, signal: pageEventController.signal },
         );
         for (const eventName of ['playing', 'canplay']) {
@@ -334,6 +352,25 @@
     }
 
     trackPlaybackIntent();
+
+    function reportPlaybackBuffering(currentVideo, buffering) {
+        // The cloud clock follows the host. A follower's local loading speed
+        // must not change the room's shared playback state.
+        if (role !== 'host' || currentVideo !== video) return;
+        if (!buffering && currentVideo.paused) return;
+        if (playbackBufferingReported === buffering) return;
+
+        playbackBufferingReported = buffering;
+        const state = videoState(
+            currentVideo,
+            buffering ? 'buffering' : 'playing',
+        );
+        state.buffering = buffering;
+
+        chrome.runtime
+            .sendMessage({ type: 'VIDEO_OUT', videoState: state })
+            .catch(() => {});
+    }
 
     function reportBufferingStatus(buffering, currentVideo) {
         bufferingReported = buffering;
