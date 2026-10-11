@@ -51,6 +51,7 @@ const state = {
     autoPause: { enabled: false, duration: 5 },
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
+    pauseAfterAutoSwitch: false,
     pauseOnBuffer: false,
     pauseOnBufferDelay: 5,
     autoCorrectionEnabled: true,
@@ -99,6 +100,7 @@ const ready = chrome.storage.local
         'autoPause',
         'autoPauseReady',
         'autoPauseStartedNavigationId',
+        'pauseAfterAutoSwitch',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
         'autoCorrectionEnabled',
@@ -158,6 +160,7 @@ function persist() {
         autoPause: state.autoPause,
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
+        pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
         pauseOnBuffer: state.pauseOnBuffer,
         pauseOnBufferDelay: state.pauseOnBufferDelay,
         autoCorrectionEnabled: state.autoCorrectionEnabled,
@@ -691,9 +694,14 @@ function announceNavigationReady() {
 }
 
 function startAutoPauseWhenReady() {
+    const pauseAfterAutoSwitch =
+        state.pauseAfterAutoSwitch &&
+        state.sharedNavigation?.automaticSwitch === true;
+
     if (
         state.role !== 'host' ||
         !state.sharedNavigation?.id ||
+        (!state.autoPause.enabled && !pauseAfterAutoSwitch) ||
         state.autoPauseStartedNavigationId === state.sharedNavigation.id
     ) {
         return;
@@ -701,14 +709,15 @@ function startAutoPauseWhenReady() {
 
     const targetClientIds = [];
 
-    if (isAutoPauseEnabledForMember(state.clientId)) {
+    if (pauseAfterAutoSwitch || isAutoPauseEnabledForMember(state.clientId)) {
         targetClientIds.push(state.clientId);
     }
 
     for (const response of state.followResponses) {
         if (
             response.status === 'following' &&
-            isAutoPauseEnabledForMember(response.clientId)
+            (pauseAfterAutoSwitch ||
+                isAutoPauseEnabledForMember(response.clientId))
         ) {
             targetClientIds.push(response.clientId);
         }
@@ -724,7 +733,9 @@ function startAutoPauseWhenReady() {
     }
 
     // A common resume time keeps every ready player paused for the same interval.
-    const duration = state.autoPause.duration;
+    const duration = pauseAfterAutoSwitch
+        ? 'manual'
+        : state.autoPause.duration;
     const resumeAt =
         duration === 'manual' ? null : Date.now() + Number(duration) * 1000;
     const payload = {
@@ -1046,6 +1057,8 @@ async function connectRoom() {
             ]);
             state.hasSeenFollowPrompt = state.hasSeenFollowPrompt === true;
             state.autoPause = message.autoPause || { enabled: false, duration: 5 };
+            state.pauseAfterAutoSwitch =
+                message.pauseAfterAutoSwitch === true;
             state.pauseOnBuffer = message.pauseOnBuffer === true;
             state.pauseOnBufferDelay = [3, 5].includes(
                 message.pauseOnBufferDelay,
@@ -1318,6 +1331,8 @@ function handleRoomEvent(message) {
             enabled: !!message.payload?.autoPause?.enabled,
             duration: message.payload?.autoPause?.duration || 5,
         };
+        state.pauseAfterAutoSwitch =
+            message.payload?.pauseAfterAutoSwitch === true;
         state.pauseOnBuffer = message.payload?.pauseOnBuffer === true;
         state.pauseOnBufferDelay = [3, 5].includes(
             message.payload?.pauseOnBufferDelay,
@@ -1694,7 +1709,10 @@ async function chooseNavigation(shouldFollow, navigation) {
     });
 }
 
-function shareHostPage(candidate, { requireVideo = false } = {}) {
+function shareHostPage(
+    candidate,
+    { requireVideo = false, automaticSwitch = false } = {},
+) {
     if (state.role !== 'host' || !state.room || !candidate) return false;
 
     const bestFrame = bestVideoFrame(candidate.tabId, candidate.url);
@@ -1727,6 +1745,7 @@ function shareHostPage(candidate, { requireVideo = false } = {}) {
         id: crypto.randomUUID(),
         url,
         title: candidate.title || selected?.title || '当前页面',
+        automaticSwitch,
     };
     addNavigationToHistory(state.sharedNavigation);
     state.autoPauseReady = [state.clientId];
@@ -1871,7 +1890,10 @@ function hostPageDetected(tabId, candidate) {
     };
 
     if (state.autoShare) {
-        shareHostPage(state.hostCandidate, { requireVideo: true });
+        shareHostPage(state.hostCandidate, {
+            requireVideo: true,
+            automaticSwitch: true,
+        });
         return;
     }
 
@@ -2520,6 +2542,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 pauseOnBuffer: state.pauseOnBuffer,
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
                 autoCorrectionEnabled: state.autoCorrectionEnabled,
+                pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
             });
             if (state.autoPause.enabled && !wasEnabled) {
                 startAutoPauseWhenReady();
@@ -2545,6 +2568,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     pauseOnBuffer: state.pauseOnBuffer,
                     pauseOnBufferDelay: state.pauseOnBufferDelay,
                     autoCorrectionEnabled: state.autoCorrectionEnabled,
+                    pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
                 });
                 return;
             }
@@ -2575,6 +2599,22 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 pauseOnBuffer: state.pauseOnBuffer,
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
                 autoCorrectionEnabled: state.autoCorrectionEnabled,
+                pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+            });
+            return;
+        }
+
+        if (message.type === 'SET_PAUSE_AFTER_AUTO_SWITCH' && state.connected) {
+            if (state.role !== 'host') return;
+
+            state.pauseAfterAutoSwitch = message.enabled === true;
+            publish();
+            sendRoomEvent('room-settings', {
+                autoPause: state.autoPause,
+                pauseOnBuffer: state.pauseOnBuffer,
+                pauseOnBufferDelay: state.pauseOnBufferDelay,
+                autoCorrectionEnabled: state.autoCorrectionEnabled,
+                pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
             });
             return;
         }
@@ -2713,6 +2753,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.followPromptEnabled = true;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseAfterAutoSwitch = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
@@ -2786,6 +2827,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.followPromptEnabled = true;
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseAfterAutoSwitch = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
@@ -2827,6 +2869,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.memberSettings = {};
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
+            state.pauseAfterAutoSwitch = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];

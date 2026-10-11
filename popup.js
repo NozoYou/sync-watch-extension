@@ -722,6 +722,9 @@ function render(state) {
         getElement('host-sharing-settings').classList.toggle('hidden', !isHost);
         getElement('auto-share').checked = !!state.autoShare;
         getElement('auto-share').disabled = !state.connected;
+        getElement('pause-after-auto-switch').checked =
+            !!state.pauseAfterAutoSwitch;
+        getElement('pause-after-auto-switch').disabled = !state.connected;
         getElement('share-current-page').disabled = !state.connected;
         getElement('auto-follow').checked =
             typeof state.memberSettings?.[state.clientId]?.autoFollow === 'boolean'
@@ -832,6 +835,7 @@ chrome.storage.local.get(
         'receivedRecommendations',
         'recommendationStatus',
         'autoPause',
+        'pauseAfterAutoSwitch',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
         'autoCorrectionEnabled',
@@ -904,6 +908,13 @@ getElement('auto-share').addEventListener('change', async () => {
         type: 'SET_AUTO_SHARE',
         enabled: getElement('auto-share').checked,
         tabId: activeTab?.id,
+    });
+});
+
+getElement('pause-after-auto-switch').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_PAUSE_AFTER_AUTO_SWITCH',
+        enabled: getElement('pause-after-auto-switch').checked,
     });
 });
 
