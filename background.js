@@ -70,6 +70,7 @@ const state = {
     controllerSettings: {
         style: 'style-1',
         enabled: true,
+        themeMode: 'system',
         rotationEnabled: true,
         skipSeconds: 85,
         position: null,
@@ -155,6 +156,11 @@ function persist() {
     state.controllerSettings = {
         style: 'style-1',
         enabled: state.controllerSettings?.enabled !== false,
+        themeMode: ['system', 'light', 'dark'].includes(
+            state.controllerSettings?.themeMode,
+        )
+            ? state.controllerSettings.themeMode
+            : 'system',
         rotationEnabled: state.controllerSettings?.rotationEnabled !== false,
         skipSeconds: Number.isFinite(
             Number(state.controllerSettings?.skipSeconds),
@@ -3029,6 +3035,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     typeof requested.enabled === 'boolean'
                         ? requested.enabled
                         : state.controllerSettings.enabled !== false,
+                themeMode: ['system', 'light', 'dark'].includes(
+                    requested.themeMode,
+                )
+                    ? requested.themeMode
+                    : state.controllerSettings.themeMode || 'system',
                 rotationEnabled:
                     typeof requested.rotationEnabled === 'boolean'
                         ? requested.rotationEnabled
@@ -3327,7 +3338,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         state.tabId = null;
         state.videoReady = false;
         state.videoFrameId = 0;
-        state.status = '房间仍连接；播放标签页已关闭，打开相同视频页可重新连接。';
+        state.status = '';
 
         // Refresh the room playback clock from the host after a member closes
         // their watched tab, even if they chose not to follow the host's video.

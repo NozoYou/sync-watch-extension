@@ -1,8 +1,8 @@
 .swc-classic-disk {
     z-index: 2;
-    border: 1px solid rgb(166 157 237 / 34%);
+    border: 1px solid rgb(251 114 153 / 40%);
     border-radius: 50%;
-    background: radial-gradient(circle, #171b2b 0 21%, #282342 22% 100%);
+    background: radial-gradient(circle, #fff 0 21%, #fff0f4 22% 100%);
     box-shadow: 0 5px 18px rgb(0 0 0 / 32%);
 }
 
@@ -16,8 +16,8 @@
 }
 
 .swc-classic-sectors .swc-sector {
-    fill: rgb(115 98 232 / 72%);
-    stroke: rgb(210 204 255 / 46%);
+    fill: rgb(251 114 153 / 72%);
+    stroke: rgb(255 255 255 / 74%);
     stroke-width: 1.25px;
     stroke-linejoin: round;
     cursor: pointer;
@@ -28,24 +28,24 @@
 }
 
 .swc-classic-sectors .swc-sector:nth-of-type(even) {
-    fill: rgb(91 78 190 / 78%);
+    fill: rgb(232 91 137 / 78%);
 }
 
 .swc-classic-sectors .swc-sector:hover,
 .swc-classic-sectors .swc-sector.is-active {
-    fill: #9588ff;
-    stroke: #eeeaff;
+    fill: #f87da2;
+    stroke: #fff4f7;
 }
 
 .swc-classic-sectors .swc-sector:focus-visible {
     outline: none;
-    fill: #a49aff;
+    fill: #f56b96;
     stroke: #fff;
     stroke-width: 2px;
 }
 
 .swc-sector-content {
-    fill: #f0eeff;
+    fill: #783046;
     pointer-events: none;
     text-anchor: middle;
     dominant-baseline: middle;
@@ -64,4 +64,32 @@
 
 .swc-classic-disk .swc-center-action {
     border: 3px solid #b9b0ff;
+}
+
+:host(.is-dark-mode) .swc-classic-disk {
+    border-color: #505258;
+    background: radial-gradient(circle, #303236 0 21%, #27292d 22% 100%);
+}
+
+:host(.is-dark-mode) .swc-classic-sectors .swc-sector {
+    fill: #3a3c41;
+    stroke: #5a5c62;
+}
+
+:host(.is-dark-mode) .swc-classic-sectors .swc-sector:nth-of-type(even) {
+    fill: #44464b;
+}
+
+:host(.is-dark-mode) .swc-classic-sectors .swc-sector:hover,
+:host(.is-dark-mode) .swc-classic-sectors .swc-sector.is-active {
+    fill: #fb7299;
+    stroke: #ffd8e3;
+}
+
+:host(.is-dark-mode) .swc-sector-content {
+    fill: #e6e6e6;
+}
+
+:host(.is-dark-mode) .swc-classic-disk .swc-center-action {
+    border-color: #ffd8e3;
 }

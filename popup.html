@@ -86,15 +86,26 @@
             </div>
         </header>
 
-        <details id="saved-progress-panel" class="saved-progress-panel">
-            <summary id="saved-progress-summary">本地保存的进度</summary>
+        <dialog id="saved-progress-panel" class="saved-progress-panel">
+            <div class="saved-progress-heading">
+                <strong>本地保存的进度</strong>
+                <button
+                    id="saved-progress-close"
+                    class="saved-progress-close"
+                    type="button"
+                    aria-label="关闭本地保存的进度"
+                    title="关闭"
+                >
+                    ×
+                </button>
+            </div>
             <div class="saved-progress-content">
                 <p id="saved-progress-empty" class="small">
                     暂无本地保存的进度。记录只保存在本机扩展中。
                 </p>
                 <div id="saved-progress-list"></div>
             </div>
-        </details>
+        </dialog>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
             <!-- Server settings stay collapsed after a server address is saved. -->
@@ -117,6 +128,24 @@
                     地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
                 </p>
             </details>
+
+            <section class="theme-setting" aria-labelledby="theme-setting-title">
+                <h2 id="theme-setting-title">主题</h2>
+                <div class="theme-options" role="group" aria-label="选择界面主题">
+                    <button class="theme-option" type="button" data-theme="system" aria-pressed="false">
+                        <span class="theme-icon theme-icon-system" aria-hidden="true">◐</span>
+                        <span class="theme-option-label">系统</span>
+                    </button>
+                    <button class="theme-option" type="button" data-theme="light" aria-pressed="false">
+                        <span class="theme-icon theme-icon-light" aria-hidden="true">☀</span>
+                        <span class="theme-option-label">浅色</span>
+                    </button>
+                    <button class="theme-option" type="button" data-theme="dark" aria-pressed="false">
+                        <span class="theme-icon theme-icon-dark" aria-hidden="true">☾</span>
+                        <span class="theme-option-label">深色</span>
+                    </button>
+                </div>
+            </section>
 
             <details id="playback-settings" class="feature-menu">
                 <summary>播放与标签页设置</summary>
@@ -241,7 +270,7 @@
         </div>
 
         <!-- Create a room or join one with the code shared by the host. -->
-        <div class="actions">
+        <div id="room-entry-actions" class="actions">
             <button id="create" class="primary">创建房间</button>
             <label class="room-capacity-label" for="room-capacity">人数</label>
             <input
@@ -265,6 +294,20 @@
 
         <!-- Room status and navigation choices are shown while in a room. -->
         <section id="room-box" class="room hidden">
+            <div class="room-top">
+                <span>房间码</span>
+                <button
+                    id="room-code"
+                    class="room-code-button"
+                    type="button"
+                    title="点击复制房间码"
+                    aria-label="点击复制房间码"
+                ></button>
+                <button id="leave" class="leave-room-button" type="button">
+                    离开
+                </button>
+            </div>
+
             <section id="member-follow-settings" class="member-follow-settings hidden">
                 <label class="setting-checkbox" for="auto-follow">
                     <input id="auto-follow" type="checkbox" />
@@ -298,13 +341,6 @@
                     分享当前页
                 </button>
             </section>
-
-            <div class="room-top">
-                <span>房间码</span>
-                <strong id="room-code"></strong>
-                <button id="copy-room" class="quiet">复制</button>
-                <button id="leave" class="quiet">离开</button>
-            </div>
 
             <div class="room-meta">
                 <span class="room-connection-group">
@@ -420,9 +456,7 @@
             <div id="recommendations-list"></div>
         </details>
 
-        <p id="status" role="status">
-            打开视频页面后创建房间，或输入朋友分享的房间码加入。
-        </p>
+        <div id="popup-toast" class="popup-toast" role="status" aria-live="polite"></div>
 
         <footer class="version-footer">
             版本 <span id="extension-version"></span>

@@ -1,5 +1,4 @@
 const getElement = (id) => document.getElementById(id);
-const statusElement = getElement('status');
 let renderedHistorySignature = '';
 let currentPlayback = null;
 let lastRenderedState = null;
@@ -8,6 +7,19 @@ let selectedPermissionTemplate = '';
 let displayNameEdited = false;
 let pendingDisplayNameSave = null;
 let displayNameComposing = false;
+let lastRecommendationStatus = null;
+let recommendationToastTimer = null;
+
+function showPopupToast(message) {
+    const toast = getElement('popup-toast');
+    toast.textContent = message;
+    toast.classList.add('is-visible');
+
+    clearTimeout(recommendationToastTimer);
+    recommendationToastTimer = setTimeout(() => {
+        toast.classList.remove('is-visible');
+    }, 2200);
+}
 
 function updateLocalGreeting() {
     const hour = new Date().getHours();
@@ -99,9 +111,6 @@ function renderSavedProgress(state) {
     const items = Array.isArray(state.savedProgress) ? state.savedProgress : [];
     const canSave = !!state.room && !!state.connected && !!state.currentPlayback;
 
-    getElement('saved-progress-summary').textContent = items.length
-        ? `本地保存的进度（${items.length}）`
-        : '本地保存的进度';
     getElement('save-current-progress').disabled = !canSave;
     getElement('save-current-progress').title = canSave
         ? '保存房间当前视频和播放进度'
@@ -691,6 +700,20 @@ function saveConfig() {
 
 function render(state) {
     lastRenderedState = state;
+    const recommendationStatus = state.recommendationStatus || '';
+    if (lastRecommendationStatus === null) {
+        lastRecommendationStatus = recommendationStatus;
+    } else if (recommendationStatus !== lastRecommendationStatus) {
+        lastRecommendationStatus = recommendationStatus;
+        if (
+            recommendationStatus &&
+            recommendationStatus !== '正在发送推荐…' &&
+            state.room &&
+            state.role !== 'host'
+        ) {
+            showPopupToast(recommendationStatus);
+        }
+    }
     currentPlayback = state.currentPlayback || null;
     renderPlaybackProgress();
     renderSavedProgress(state);
@@ -704,6 +727,17 @@ function render(state) {
         controllerSettings.enabled !== false;
     getElement('controller-rotation').checked =
         controllerSettings.rotationEnabled !== false;
+    const themeMode = ['system', 'light', 'dark'].includes(
+        controllerSettings.themeMode,
+    )
+        ? controllerSettings.themeMode
+        : 'system';
+    document.querySelectorAll('.theme-option').forEach((option) => {
+        const selected = option.dataset.theme === themeMode;
+        option.setAttribute('aria-pressed', String(selected));
+        option.classList.toggle('is-selected', selected);
+    });
+    applyThemeMode(themeMode);
     const controllerSize = Number(controllerSettings.size) || 168;
     getElement('controller-size').value = String(controllerSize);
     getElement('controller-size-value').value = String(controllerSize);
@@ -737,6 +771,7 @@ function render(state) {
     }
 
     if (state.room) {
+        getElement('room-entry-actions').classList.add('hidden');
         getElement('room-box').classList.remove('hidden');
         getElement('playback-settings').classList.remove('hidden');
         getElement('room-code').textContent = state.room;
@@ -752,7 +787,7 @@ function render(state) {
 
         const isGuest = state.role !== 'host';
         const isHost = state.role === 'host';
-        getElement('member-follow-settings').classList.remove('hidden');
+        getElement('member-follow-settings').classList.toggle('hidden', !isGuest);
         getElement('host-sharing-settings').classList.toggle('hidden', !isHost);
         getElement('auto-share').checked = !!state.autoShare;
         getElement('auto-share').disabled = !state.connected;
@@ -820,6 +855,7 @@ function render(state) {
 
     } else {
         renderShareHistory([], '');
+        getElement('room-entry-actions').classList.remove('hidden');
         getElement('room-box').classList.add('hidden');
         getElement('room-member-list').replaceChildren();
         getElement('room-playback-area').classList.add('hidden');
@@ -848,11 +884,6 @@ function render(state) {
         getElement('recommendations-panel').classList.add('hidden');
     }
 
-    if (state.recommendationStatus) {
-        statusElement.textContent = state.recommendationStatus;
-    } else if (state.status) {
-        statusElement.textContent = state.status;
-    }
 }
 
 // Populate the popup from saved state, then keep it current while it is open.
@@ -955,6 +986,39 @@ getElement('controller-enabled').addEventListener('change', () => {
 getElement('controller-rotation').addEventListener('change', () => {
     updateControllerSettings({
         rotationEnabled: getElement('controller-rotation').checked,
+    });
+});
+
+const systemColorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+function applyThemeMode(mode) {
+    document.body.classList.toggle(
+        'dark-mode',
+        mode === 'dark' || (mode === 'system' && systemColorScheme.matches),
+    );
+}
+
+systemColorScheme.addEventListener('change', () => {
+    if (getSelectedThemeMode() === 'system') {
+        applyThemeMode('system');
+    }
+});
+
+function getSelectedThemeMode() {
+    return document.querySelector('.theme-option[aria-pressed="true"]')
+        ?.dataset.theme || 'system';
+}
+
+document.querySelectorAll('.theme-option').forEach((option) => {
+    option.addEventListener('click', () => {
+        const themeMode = option.dataset.theme;
+        document.querySelectorAll('.theme-option').forEach((item) => {
+            const selected = item === option;
+            item.setAttribute('aria-pressed', String(selected));
+            item.classList.toggle('is-selected', selected);
+        });
+        applyThemeMode(themeMode);
+        updateControllerSettings({ themeMode });
     });
 });
 
@@ -1125,8 +1189,15 @@ menuToggle.addEventListener('click', () => {
 });
 
 savedProgressToggle.addEventListener('click', () => {
-    savedProgressPanel.open = true;
-    savedProgressPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!savedProgressPanel.open) savedProgressPanel.showModal();
+});
+
+getElement('saved-progress-close').addEventListener('click', () => {
+    savedProgressPanel.close();
+});
+
+savedProgressPanel.addEventListener('click', (event) => {
+    if (event.target === savedProgressPanel) savedProgressPanel.close();
 });
 
 document.addEventListener('click', (event) => {
@@ -1144,9 +1215,9 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-getElement('copy-room').onclick = async () => {
+getElement('room-code').onclick = async () => {
     await navigator.clipboard.writeText(getElement('room-code').textContent);
-    statusElement.textContent = '房间码已复制。';
+    showPopupToast('房间码已复制。');
 };
 
 getElement('recommend-page').addEventListener('click', async () => {
@@ -1181,9 +1252,9 @@ getElement('save-display-name').addEventListener('click', () => {
     getElement('display-name').value = savedName;
     getElement('display-name-label').textContent = savedName;
     setDisplayNameEditing(false);
-    statusElement.textContent = name
+    showPopupToast(name
         ? '房间显示名称已保存。'
-        : '名称已清空，将显示为“成员”。';
+        : '名称已清空，将显示为“成员”。');
 });
 
 getElement('display-name').addEventListener('input', () => {
@@ -1243,5 +1314,5 @@ getElement('apply-member-settings-all').addEventListener('click', () => {
         sourceClientId,
         settings: Object.fromEntries(keys.map((key) => [key, !!settings[key]])),
     });
-    statusElement.textContent = '已将该成员的权限应用给其他成员。';
+    showPopupToast('已将该成员的权限应用给其他成员。');
 });

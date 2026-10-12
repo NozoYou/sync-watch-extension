@@ -19,7 +19,7 @@
     height: 168px;
     overflow: visible;
     pointer-events: none;
-    color: #f1f2fb;
+    color: #49353e;
     font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color-scheme: dark;
     contain: layout style;
@@ -78,11 +78,11 @@
 }
 
 .swc-progress-track {
-    stroke: rgb(176 182 209 / 16%);
+    stroke: rgb(210 108 143 / 22%);
 }
 
 .swc-progress-value {
-    stroke: #9689ff;
+    stroke: #fb7299;
     stroke-linecap: round;
     transition: stroke-dashoffset 180ms linear;
 }
@@ -98,7 +98,7 @@
     inset: 7px;
     width: 154px;
     height: 154px;
-    border: 1px dashed rgb(173 163 255 / 32%);
+    border: 1px dashed rgb(251 114 153 / 42%);
     border-radius: 50%;
 }
 
@@ -110,9 +110,9 @@
     max-width: calc(100vw - 24px);
     padding: 6px 10px;
     transform: translateX(-50%);
-    border: 1px solid #595278;
+    border: 1px solid #edbfd0;
     border-radius: 999px;
-    background: #171b2b;
+    background: #fff;
     box-shadow: 0 5px 15px rgb(0 0 0 / 35%);
     color: #d5d0ff;
     font: inherit;
@@ -143,7 +143,7 @@
 .swc-center-action:focus-visible,
 .swc-panel button:focus-visible,
 .swc-panel input:focus-visible {
-    outline: 2px solid #c5bcff;
+    outline: 2px solid #f7a2bc;
     outline-offset: 2px;
 }
 
@@ -172,8 +172,8 @@ button:focus:not(:focus-visible),
 
 .swc-action:hover,
 .swc-action.is-active {
-    color: #fff;
-    background-color: rgb(120 103 245 / 35%);
+    color: #963953;
+    background-color: rgb(251 114 153 / 30%);
 }
 
 .swc-center-action {
@@ -187,9 +187,9 @@ button:focus:not(:focus-visible),
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgb(192 186 255 / 65%);
+    border: 1px solid rgb(255 255 255 / 82%);
     border-radius: 50%;
-    background: #7161e8;
+    background: #fb7299;
     box-shadow: 0 5px 18px rgb(0 0 0 / 34%);
     color: white;
     font-size: 27px;
@@ -202,7 +202,7 @@ button:focus:not(:focus-visible),
 }
 
 .swc-center-action:hover {
-    background: #8274f5;
+    background: #f986a6;
 }
 
 :host(.is-dragging),
@@ -247,13 +247,13 @@ button:focus:not(:focus-visible),
 }
 
 .swc-dock-shape path {
-    fill: rgb(113 97 232 / 68%);
-    stroke: rgb(203 195 255 / 58%);
+    fill: rgb(251 114 153 / 68%);
+    stroke: rgb(255 255 255 / 72%);
     stroke-width: 1px;
 }
 
 .swc-dock-toggle:hover .swc-dock-shape path {
-    fill: rgb(113 97 232 / 92%);
+    fill: rgb(251 114 153 / 92%);
 }
 
 .swc-dock-icon {
@@ -268,9 +268,9 @@ button:focus:not(:focus-visible),
     z-index: 30;
     min-width: 148px;
     padding: 4px;
-    border: 1px solid #595278;
+    border: 1px solid #edbfd0;
     border-radius: 10px;
-    background: #191c2b;
+    background: #fff8fa;
     box-shadow: 0 6px 22px rgb(0 0 0 / 38%);
     pointer-events: auto;
 }
@@ -286,7 +286,7 @@ button:focus:not(:focus-visible),
     border: 0;
     border-radius: 7px;
     background: transparent;
-    color: #f1f2fb;
+    color: #49353e;
     font: inherit;
     text-align: left;
     cursor: pointer;
@@ -295,7 +295,7 @@ button:focus:not(:focus-visible),
 .swc-context-menu button:hover,
 .swc-context-menu button:focus-visible {
     outline: none;
-    background: #302d49;
+    background: #ffe3ec;
 }
 
 :host(.is-docked) {
@@ -336,8 +336,8 @@ button:focus:not(:focus-visible),
 }
 
 :host(.is-fullscreen) .swc-dock-shape path {
-    fill: rgb(113 97 232 / 48%);
-    stroke: rgb(203 195 255 / 38%);
+    fill: rgb(251 114 153 / 48%);
+    stroke: rgb(255 255 255 / 66%);
 }
 
 :host(.is-fullscreen) .swc-dock-icon {
@@ -373,8 +373,8 @@ button:focus:not(:focus-visible),
 }
 
 :host(.is-collapsed:not(.is-docked)) .swc-dock-shape path {
-    fill: rgb(113 97 232 / 58%);
-    stroke: rgb(203 195 255 / 48%);
+    fill: rgb(251 114 153 / 58%);
+    stroke: rgb(255 255 255 / 70%);
 }
 
 :host(.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {
@@ -398,8 +398,8 @@ button:focus:not(:focus-visible),
 }
 
 :host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-shape path {
-    fill: rgb(113 97 232 / 42%);
-    stroke: rgb(203 195 255 / 32%);
+    fill: rgb(251 114 153 / 42%);
+    stroke: rgb(255 255 255 / 58%);
 }
 
 :host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {
@@ -441,11 +441,11 @@ button:focus:not(:focus-visible),
     overflow: auto;
     overscroll-behavior: contain;
     padding: 14px;
-    border: 1px solid #595278;
+    border: 1px solid #edbfd0;
     border-radius: 14px;
-    background: #151827;
+    background: #fff8fa;
     box-shadow: 0 12px 36px rgb(0 0 0 / 50%);
-    color: #eef0fb;
+    color: #49353e;
     pointer-events: auto;
 }
 
@@ -455,7 +455,7 @@ button:focus:not(:focus-visible),
 
 .swc-panel h2 {
     margin: 0 0 12px;
-    color: #f6f5ff;
+    color: #49353e;
     font-size: 15px;
 }
 
@@ -473,17 +473,17 @@ button:focus:not(:focus-visible),
 .swc-form label {
     display: grid;
     gap: 6px;
-    color: #b6bbcf;
+    color: #806b74;
 }
 
 .swc-form input {
     width: 100%;
     min-width: 0;
     padding: 9px 10px;
-    border: 1px solid #42485e;
+    border: 1px solid #e8c4d0;
     border-radius: 8px;
-    background: #202538;
-    color: #f4f4fb;
+    background: #fff0f4;
+    color: #49353e;
     font: inherit;
 }
 
@@ -491,31 +491,31 @@ button:focus:not(:focus-visible),
     min-height: 34px;
     padding: 7px 10px;
     border-radius: 8px;
-    background: #2a3043;
-    color: #eceaff;
+    background: #ffe3ec;
+    color: #49353e;
 }
 
 .swc-panel button:hover {
-    background: #3a4058;
+    background: #fbd5e0;
 }
 
 .swc-panel button.swc-primary {
-    background: #7464ef;
+    background: #fb7299;
     color: white;
     font-weight: 700;
 }
 
 .swc-panel button.swc-primary:hover {
-    background: #8578fa;
+    background: #e85b89;
 }
 
 .swc-panel button.swc-danger {
-    color: #ffb8bd;
+    color: #d94f72;
 }
 
 .swc-empty,
 .swc-history-time {
-    color: #aeb4c8;
+    color: #806b74;
 }
 
 .swc-history-list {
@@ -528,14 +528,14 @@ button:focus:not(:focus-visible),
     min-width: 0;
     padding: 8px;
     border-radius: 8px;
-    background: #202538;
+    background: #fff0f4;
 }
 
 .swc-history-list summary,
 .swc-history-list strong {
     display: block;
     overflow-wrap: anywhere;
-    color: #eeecff;
+    color: #49353e;
     font-weight: 650;
 }
 
@@ -545,7 +545,7 @@ button:focus:not(:focus-visible),
 
 .swc-url {
     margin: 7px 0 !important;
-    color: #a69bff;
+    color: #d95f84;
     overflow-wrap: anywhere;
     font-size: 11px;
 }
@@ -570,11 +570,11 @@ button:focus:not(:focus-visible),
     max-width: 290px;
     padding: 6px 10px;
     transform: translate(-50%, 100%);
-    border: 1px solid #555b72;
+    border: 1px solid #edbfd0;
     border-radius: 8px;
-    background: #171b2b;
+    background: #fff;
     box-shadow: 0 5px 15px rgb(0 0 0 / 40%);
-    color: #f1efff;
+    color: #49353e;
     opacity: 0;
     pointer-events: none;
     transition: opacity 140ms ease;
@@ -595,4 +595,58 @@ button:focus:not(:focus-visible),
     .swc-toast {
         transition: none;
     }
+}
+
+:host(.is-dark-mode) {
+    color-scheme: dark;
+    color: #e6e6e6;
+}
+
+:host(.is-dark-mode) .swc-room-code,
+:host(.is-dark-mode) .swc-panel,
+:host(.is-dark-mode) .swc-context-menu {
+    border-color: #505258;
+    background: #2b2d30;
+    color: #e6e6e6;
+}
+
+:host(.is-dark-mode) .swc-room-code:hover,
+:host(.is-dark-mode) .swc-panel button,
+:host(.is-dark-mode) .swc-history-list li,
+:host(.is-dark-mode) .swc-form input,
+:host(.is-dark-mode) .swc-context-menu button:hover {
+    background: #393b40;
+    color: #e6e6e6;
+}
+
+:host(.is-dark-mode) .swc-panel h2,
+:host(.is-dark-mode) .swc-history-list summary,
+:host(.is-dark-mode) .swc-history-list strong {
+    color: #f0a0b8;
+}
+
+:host(.is-dark-mode) .swc-form label,
+:host(.is-dark-mode) .swc-empty,
+:host(.is-dark-mode) .swc-history-time,
+:host(.is-dark-mode) .swc-url {
+    color: #b8bbc2;
+}
+
+:host(.is-dark-mode) .swc-form input {
+    border-color: #505258;
+}
+
+:host(.is-dark-mode) .swc-toast {
+    border-color: #505258;
+    background: #2b2d30;
+    color: #e6e6e6;
+}
+
+:host(.is-dark-mode) .swc-dock-shape path {
+    fill: rgb(48 50 54 / 94%);
+    stroke: rgb(230 230 230 / 30%);
+}
+
+:host(.is-dark-mode) .swc-rotation-decoration {
+    border-color: rgb(230 230 230 / 24%);
 }

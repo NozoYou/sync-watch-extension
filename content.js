@@ -68,7 +68,7 @@
     const tabIconId = '__sync_watch_tab_icon';
     const tabIconSvg = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-            <rect width="64" height="64" rx="18" fill="#7666f4" />
+            <rect width="64" height="64" rx="18" fill="#fb7299" />
             <path
                 d="M25 17.5c-1.2-.7-2.7.2-2.7 1.6v25.8c0 1.4 1.5 2.3 2.7 1.6l21-12.9a1.9 1.9 0 0 0 0-3.2z"
                 fill="#fff"
@@ -863,7 +863,7 @@
         const root = document.createElement('div');
         root.id = '__sync_watch_prompt';
         root.style.cssText =
-            'position:fixed;z-index:2147483647;top:18px;right:18px;width:min(390px,calc(100vw - 36px));padding:15px;background:#151827;color:#f4f5fb;border:1px solid #6f62db;border-radius:12px;box-shadow:0 12px 38px #0008;font:14px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
+            'position:fixed;z-index:2147483647;top:18px;right:18px;width:min(390px,calc(100vw - 36px));padding:15px;background:#fff8fa;color:#49353e;border:1px solid #fb7299;border-radius:12px;box-shadow:0 12px 38px #0008;font:14px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
 
         const title = document.createElement('strong');
         title.textContent = isHostPrompt ? '分享新视频？' : '主机分享了新视频';
@@ -872,7 +872,7 @@
         const description = document.createElement('div');
         description.textContent = data.title || data.url || '新视频';
         description.style.cssText =
-            'color:#b8bfd1;overflow-wrap:anywhere;margin-bottom:12px';
+            'color:#806b74;overflow-wrap:anywhere;margin-bottom:12px';
 
         const actions = document.createElement('div');
         actions.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
@@ -880,7 +880,7 @@
         function addButton(label, primary, onClick) {
             const button = document.createElement('button');
             button.textContent = label;
-            button.style.cssText = `border:0;border-radius:8px;padding:8px 12px;background:${primary ? '#7666f4' : '#2a3040'};color:#fff;font-weight:600;cursor:pointer`;
+            button.style.cssText = `border:0;border-radius:8px;padding:8px 12px;background:${primary ? '#fb7299' : '#ffe3ec'};color:${primary ? '#fff' : '#49353e'};font-weight:600;cursor:pointer`;
             button.onclick = onClick;
             actions.append(button);
         }
@@ -898,10 +898,10 @@
             if (data.askPreference) {
                 const preference = document.createElement('label');
                 preference.style.cssText =
-                    'display:flex;align-items:center;gap:7px;margin:0 auto 10px;color:#b8bfd1;font-size:12px';
+                    'display:flex;align-items:center;gap:7px;margin:0 auto 10px;color:#806b74;font-size:12px';
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.style.cssText = 'accent-color:#8777ff';
+                checkbox.style.cssText = 'accent-color:#fa8eae';
                 preference.append(
                     checkbox,
                     document.createTextNode('保持开启此提示（之后可在设置中重新开启）'),

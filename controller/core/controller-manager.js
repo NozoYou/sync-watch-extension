@@ -7,6 +7,9 @@
         const windowRef = options.window || window;
         const actions = options.actions;
         const globalEvents = new AbortController();
+        const systemColorScheme = windowRef.matchMedia?.(
+            '(prefers-color-scheme: dark)',
+        );
         let videoEvents = null;
         let videoLayoutObserver = null;
         let video = null;
@@ -38,6 +41,17 @@
         let dockPath = null;
         let contextMenu = null;
         let roomCodeButton = null;
+
+        systemColorScheme?.addEventListener(
+            'change',
+            () => {
+                const themeMode = state.controllerSettings?.themeMode || 'system';
+                if (themeMode === 'system') {
+                    host?.classList.toggle('is-dark-mode', systemColorScheme.matches);
+                }
+            },
+            { signal: globalEvents.signal },
+        );
 
         function ensureHost() {
             if (host) return;
@@ -1018,6 +1032,7 @@
                 state.controllerSettings = {
                     style: 'style-1',
                     enabled: true,
+                    themeMode: 'system',
                     rotationEnabled: true,
                     position: null,
                     size: 168,
@@ -1042,6 +1057,12 @@
                 : '';
             roomCodeButton.title = roomCode ? '点击复制房间码' : '';
             host.classList.toggle('has-room', !!roomCode);
+            host.classList.toggle(
+                'is-dark-mode',
+                state.controllerSettings.themeMode === 'dark' ||
+                    ((state.controllerSettings.themeMode || 'system') === 'system' &&
+                        !!systemColorScheme?.matches),
+            );
             rotation?.setEnabled(
                 state.controllerSettings.rotationEnabled !== false,
             );
