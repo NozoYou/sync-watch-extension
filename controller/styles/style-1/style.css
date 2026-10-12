@@ -1,0 +1,67 @@
+.swc-classic-disk {
+    z-index: 2;
+    border: 1px solid rgb(166 157 237 / 34%);
+    border-radius: 50%;
+    background: radial-gradient(circle, #171b2b 0 21%, #282342 22% 100%);
+    box-shadow: 0 5px 18px rgb(0 0 0 / 32%);
+}
+
+.swc-classic-sectors {
+    position: absolute;
+    inset: 0;
+    width: 168px;
+    height: 168px;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.swc-classic-sectors .swc-sector {
+    fill: rgb(115 98 232 / 72%);
+    stroke: rgb(210 204 255 / 46%);
+    stroke-width: 1.25px;
+    stroke-linejoin: round;
+    cursor: pointer;
+    pointer-events: auto;
+    transition:
+        fill 140ms ease,
+        stroke 140ms ease;
+}
+
+.swc-classic-sectors .swc-sector:nth-of-type(even) {
+    fill: rgb(91 78 190 / 78%);
+}
+
+.swc-classic-sectors .swc-sector:hover,
+.swc-classic-sectors .swc-sector.is-active {
+    fill: #9588ff;
+    stroke: #eeeaff;
+}
+
+.swc-classic-sectors .swc-sector:focus-visible {
+    outline: none;
+    fill: #a49aff;
+    stroke: #fff;
+    stroke-width: 2px;
+}
+
+.swc-sector-content {
+    fill: #f0eeff;
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    user-select: none;
+}
+
+.swc-sector-icon {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.swc-sector-label {
+    font-size: 8px;
+    font-weight: 600;
+}
+
+.swc-classic-disk .swc-center-action {
+    border: 3px solid #b9b0ff;
+}

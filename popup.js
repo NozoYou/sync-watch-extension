@@ -676,6 +676,12 @@ function render(state) {
     const savedDisplayName = String(state.displayName || '').trim();
     getElement('display-name-label').textContent = savedDisplayName || '成员';
     updateLocalGreeting();
+    const controllerSettings = state.controllerSettings || {};
+    getElement('controller-rotation').checked =
+        controllerSettings.rotationEnabled !== false;
+    const controllerSize = Number(controllerSettings.size) || 168;
+    getElement('controller-size').value = String(controllerSize);
+    getElement('controller-size-value').value = String(controllerSize);
 
     const displayNameInput = getElement('display-name');
     if (pendingDisplayNameSave !== null) {
@@ -836,6 +842,7 @@ chrome.storage.local.get(
         'recommendationStatus',
         'autoPause',
         'pauseAfterAutoSwitch',
+        'controllerSettings',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
         'autoCorrectionEnabled',
@@ -897,6 +904,30 @@ getElement('auto-follow').addEventListener('change', () => {
         type: 'SET_AUTO_FOLLOW',
         enabled: getElement('auto-follow').checked,
     });
+});
+
+function updateControllerSettings(changes) {
+    const current = lastRenderedState?.controllerSettings || {};
+    chrome.runtime.sendMessage({
+        type: 'SET_CONTROLLER_SETTINGS',
+        settings: { ...current, ...changes },
+    });
+}
+
+getElement('controller-rotation').addEventListener('change', () => {
+    updateControllerSettings({
+        rotationEnabled: getElement('controller-rotation').checked,
+    });
+});
+
+getElement('controller-size').addEventListener('input', () => {
+    const size = Number(getElement('controller-size').value);
+    getElement('controller-size-value').value = String(size);
+    updateControllerSettings({ size });
+});
+
+getElement('reset-controller-position').addEventListener('click', () => {
+    updateControllerSettings({ position: null, dockSide: 'right' });
 });
 
 getElement('auto-share').addEventListener('change', async () => {

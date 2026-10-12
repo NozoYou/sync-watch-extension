@@ -1,0 +1,15 @@
+.swc-rotation-decoration.is-rotating {
+    animation: swc-orbit-rotation 18s linear infinite;
+}
+
+@keyframes swc-orbit-rotation {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .swc-rotation-decoration.is-rotating {
+        animation: none;
+    }
+}

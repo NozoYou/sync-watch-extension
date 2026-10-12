@@ -18,6 +18,7 @@
     const isTop = window === window.top;
     const expectedMediaEvents = new WeakMap();
     const pageEventController = new AbortController();
+    let videoEventController = new AbortController();
     const activeControlPointers = new Set();
     const playbackKeys = new Set([
         'Space',
@@ -61,6 +62,7 @@
     let bufferingReportingEnabled = false;
     let playbackBufferingReported = false;
     const bufferingPauseStates = new WeakMap();
+    let floatingController = null;
 
     const tabTitlePrefix = '[一起看] ';
     const tabIconId = '__sync_watch_tab_icon';
@@ -293,14 +295,20 @@
             .catch(() => {});
     }
 
-    function bind(currentVideo) {
-        if (!currentVideo || currentVideo === video) return;
+    function bind(currentVideo, force = false) {
+        if (!currentVideo) return false;
+        if (currentVideo === video && !force) {
+            floatingController?.setVideo(currentVideo);
+            return true;
+        }
 
         if (bufferingReported) reportBufferingStatus(false, bufferingVideo);
         clearTimeout(bufferingTimer);
         bufferingTimer = null;
         bufferingCandidate = null;
         playbackBufferingReported = false;
+        videoEventController.abort();
+        videoEventController = new AbortController();
 
         video = currentVideo;
         videoBindingId += 1;
@@ -321,19 +329,19 @@
 
                     sendVideo(currentVideo, eventName);
                 },
-                { passive: true, signal: pageEventController.signal },
+                { passive: true, signal: videoEventController.signal },
             );
         }
 
         currentVideo.addEventListener(
             'seeking',
             () => sendVideo(currentVideo, 'seeking'),
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         currentVideo.addEventListener(
             'timeupdate',
             () => sendVideo(currentVideo, currentVideo.seeking ? 'seeking' : 'time'),
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         currentVideo.addEventListener(
             'waiting',
@@ -341,7 +349,7 @@
                 scheduleBufferingStatus(currentVideo);
                 reportPlaybackBuffering(currentVideo, true);
             },
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         currentVideo.addEventListener(
             'stalled',
@@ -349,25 +357,28 @@
                 scheduleBufferingStatus(currentVideo);
                 reportPlaybackBuffering(currentVideo, true);
             },
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         currentVideo.addEventListener(
             'error',
             () => reportPlaybackBuffering(currentVideo, true),
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         currentVideo.addEventListener(
             'playing',
             () => reportPlaybackBuffering(currentVideo, false),
-            { passive: true, signal: pageEventController.signal },
+            { passive: true, signal: videoEventController.signal },
         );
         for (const eventName of ['playing', 'canplay']) {
             currentVideo.addEventListener(
                 eventName,
                 () => clearBufferingStatus(currentVideo),
-                { passive: true, signal: pageEventController.signal },
+                { passive: true, signal: videoEventController.signal },
             );
         }
+
+        floatingController?.setVideo(currentVideo);
+        return true;
     }
 
     trackPlaybackIntent();
@@ -931,7 +942,33 @@
     }
 
     function handleRuntimeMessage(message) {
-        if (message.type === 'PAUSE_FOR_ROOM_INJECTION') {
+        if (message.type === 'STATE') {
+            floatingController?.update(message.state);
+        } else if (message.type === 'CONTROLLER_ACTIVE') {
+            floatingController?.setActive(message.active);
+        } else if (message.type === 'REBIND_PLAYER') {
+            const currentVideo = chooseVideo();
+            if (!currentVideo) {
+                chrome.runtime.sendMessage({
+                    type: 'REBIND_PLAYER_RESULT',
+                    success: false,
+                    message: '未找到播放器。',
+                }).catch(() => {});
+                floatingController?.showMessage('未找到播放器。');
+                reportInjectionStatus(true);
+                return;
+            }
+
+            bind(currentVideo, true);
+            reportVideoFrame();
+            reportInjectionStatus(true);
+            // Report success only after the local video listeners are replaced.
+            chrome.runtime.sendMessage({
+                type: 'REBIND_PLAYER_RESULT',
+                success: true,
+            }).catch(() => {});
+            floatingController?.showMessage('绑定成功。');
+        } else if (message.type === 'PAUSE_FOR_ROOM_INJECTION') {
             waitingForRoomPlayback = true;
             for (const currentVideo of document.querySelectorAll('video')) {
                 if (!currentVideo.paused) {
@@ -995,7 +1032,33 @@
         }
     }
 
+    floatingController = window.SyncWatchController?.manager?.create({
+        document,
+        window,
+        actions: window.SyncWatchController.createActions(
+            (message) => chrome.runtime.sendMessage(message),
+            chooseVideo,
+            (message) => floatingController?.showMessage(message),
+        ),
+    });
+    floatingController?.update({
+        controllerSettings: {
+            style: 'style-1',
+            rotationEnabled: true,
+            position: null,
+            dockSide: 'right',
+        },
+        controllerActive: false,
+    });
+
     chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+
+    chrome.runtime
+        .sendMessage({ type: 'GET_CONTROLLER_STATE' })
+        .then((response) => {
+            if (response?.state) floatingController?.update(response.state);
+        })
+        .catch(() => {});
 
     if (isTop) chrome.runtime.sendMessage({ type: 'GET_ROLE' });
 
@@ -1082,6 +1145,7 @@
 
         // Clear local listeners and timers even if Chrome has already invalidated
         // this extension context (for example, after reloading the extension).
+        videoEventController.abort();
         pageEventController.abort();
         try {
             chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
@@ -1090,6 +1154,8 @@
         }
         pageObserver?.disconnect();
         tabMarkerObserver?.disconnect();
+        floatingController?.destroy();
+        floatingController = null;
         clearInterval(reportInterval);
         clearTimeout(autoPauseTimer);
         clearTimeout(bufferingTimer);

@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.10.13",
+    "version": "0.10.14",
     "description": "和朋友的视频同步播放插件。",
     "permissions": [
         "activeTab",
@@ -29,14 +29,31 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["tab-icon.svg"],
+            "resources": [
+                "tab-icon.svg",
+                "controller/styles/shared.css",
+                "controller/styles/style-1/style.css",
+                "controller/animations/rotation.css"
+            ],
             "matches": ["<all_urls>"]
         }
     ],
     "content_scripts": [
         {
             "matches": ["<all_urls>"],
-            "js": ["content.js"],
+            "js": [
+                "controller/core/progress-ring.js",
+                "controller/animations/rotation.js",
+                "controller/player/skip-segments.js",
+                "controller/panels/create-room.js",
+                "controller/panels/join-room.js",
+                "controller/panels/shared-history.js",
+                "controller/panels/local-history.js",
+                "controller/styles/style-1/index.js",
+                "controller/core/controller-actions.js",
+                "controller/core/controller-manager.js",
+                "content.js"
+            ],
             "run_at": "document_idle",
             "all_frames": true,
             "match_origin_as_fallback": true

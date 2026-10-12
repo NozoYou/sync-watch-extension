@@ -1,0 +1,523 @@
+:host {
+    all: initial;
+    display: block;
+}
+
+:host([hidden]) {
+    display: none !important;
+}
+
+:host,
+:host * {
+    box-sizing: border-box;
+}
+
+:host {
+    position: fixed;
+    z-index: 2147483647;
+    width: 168px;
+    height: 168px;
+    overflow: visible;
+    pointer-events: none;
+    color: #f1f2fb;
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color-scheme: dark;
+    contain: layout style;
+    isolation: isolate;
+}
+
+:host *,
+:host *::before,
+:host *::after {
+    box-sizing: border-box;
+}
+
+.swc-layer {
+    position: relative;
+    width: 168px;
+    height: 168px;
+    overflow: visible;
+    pointer-events: none;
+    transform: scale(var(--swc-scale, 1));
+    transform-origin: top left;
+}
+
+.swc-disk {
+    position: relative;
+    width: 168px;
+    height: 168px;
+    overflow: visible;
+    pointer-events: auto;
+    isolation: isolate;
+    z-index: 2;
+    cursor: grab;
+    touch-action: none;
+}
+
+.swc-progress-ring,
+.swc-rotation-decoration {
+    position: absolute;
+    inset: 0;
+    width: 168px;
+    height: 168px;
+    pointer-events: none;
+}
+
+.swc-progress-ring {
+    overflow: visible;
+    transform: rotate(-90deg);
+    z-index: 5;
+}
+
+.swc-progress-track,
+.swc-progress-value {
+    fill: none;
+    stroke-width: 2;
+}
+
+.swc-progress-track {
+    stroke: rgb(176 182 209 / 16%);
+}
+
+.swc-progress-value {
+    stroke: #9689ff;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 180ms linear;
+}
+
+.swc-progress-ring.is-indeterminate .swc-progress-value {
+    stroke: #f0ba5e;
+    stroke-dasharray: 22 18;
+    stroke-dashoffset: 0;
+}
+
+.swc-rotation-decoration {
+    z-index: 1;
+    inset: 7px;
+    width: 154px;
+    height: 154px;
+    border: 1px dashed rgb(173 163 255 / 32%);
+    border-radius: 50%;
+}
+
+.swc-action,
+.swc-center-action,
+.swc-panel button {
+    border: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.swc-action:focus-visible,
+.swc-center-action:focus-visible,
+.swc-panel button:focus-visible,
+.swc-panel input:focus-visible {
+    outline: 2px solid #c5bcff;
+    outline-offset: 2px;
+}
+
+.swc-action {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px;
+    border-radius: 12px;
+    background: transparent;
+    pointer-events: auto;
+    transition:
+        color 140ms ease,
+        background-color 140ms ease,
+        transform 140ms ease;
+}
+
+.swc-action:hover,
+.swc-action.is-active {
+    color: #fff;
+    background-color: rgb(120 103 245 / 35%);
+}
+
+.swc-center-action {
+    position: absolute;
+    z-index: 4;
+    left: 55px;
+    top: 55px;
+    display: flex;
+    width: 58px;
+    height: 58px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(192 186 255 / 65%);
+    border-radius: 50%;
+    background: #7161e8;
+    box-shadow: 0 5px 18px rgb(0 0 0 / 34%);
+    color: white;
+    font-size: 27px;
+    pointer-events: auto;
+}
+
+.swc-center-action small {
+    font-size: 10px;
+    line-height: 1;
+}
+
+.swc-center-action:hover {
+    background: #8274f5;
+}
+
+:host(.is-dragging),
+:host(.is-dragging) * {
+    cursor: grabbing !important;
+}
+
+.swc-dock-toggle {
+    position: absolute;
+    z-index: 20;
+    top: 50%;
+    left: 0;
+    display: none;
+    width: 36px;
+    height: 72px;
+    padding: 0;
+    border: 0;
+    appearance: none;
+    background: transparent;
+    color: rgb(255 255 255 / 88%);
+    cursor: pointer;
+    font: 600 16px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    pointer-events: auto;
+    text-align: center;
+    transform: translateY(-50%);
+    opacity: 0.86;
+    transition: opacity 140ms ease;
+}
+
+.swc-dock-toggle:hover {
+    opacity: 1;
+}
+
+.swc-dock-shape {
+    position: absolute;
+    inset: 0;
+    width: 36px;
+    height: 72px;
+    overflow: visible;
+    filter: drop-shadow(0 2px 5px rgb(0 0 0 / 35%));
+    pointer-events: none;
+}
+
+.swc-dock-shape path {
+    fill: rgb(113 97 232 / 68%);
+    stroke: rgb(203 195 255 / 58%);
+    stroke-width: 1px;
+}
+
+.swc-dock-toggle:hover .swc-dock-shape path {
+    fill: rgb(113 97 232 / 92%);
+}
+
+.swc-dock-icon {
+    position: absolute;
+    top: 50%;
+    left: 15px;
+    transform: translate(-50%, -50%);
+}
+
+:host(.is-docked) {
+    transform: none;
+}
+
+:host(.dock-left) {
+    transform-origin: left top;
+}
+
+:host(.dock-right) {
+    transform-origin: right top;
+}
+
+:host(.dock-right) .swc-dock-toggle {
+    left: auto;
+    right: 0;
+}
+
+:host(.dock-right) .swc-dock-shape {
+    transform: scaleX(-1);
+}
+
+:host(.dock-right) .swc-dock-icon {
+    right: 15px;
+    left: auto;
+}
+
+:host(.is-fullscreen) .swc-dock-toggle {
+    width: 26px;
+    height: 52px;
+    opacity: 0.55;
+}
+
+:host(.is-fullscreen) .swc-dock-shape {
+    width: 26px;
+    height: 52px;
+}
+
+:host(.is-fullscreen) .swc-dock-shape path {
+    fill: rgb(113 97 232 / 48%);
+    stroke: rgb(203 195 255 / 38%);
+}
+
+:host(.is-fullscreen) .swc-dock-icon {
+    left: 11px;
+    font-size: 13px;
+}
+
+:host(.is-fullscreen).dock-right .swc-dock-icon {
+    right: 11px;
+    left: auto;
+}
+
+:host(.is-collapsed:not(.is-docked)) .swc-dock-toggle {
+    top: 50%;
+    left: 50%;
+    width: 51px;
+    height: 51px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 0.78;
+}
+
+:host(.is-collapsed:not(.is-docked)) .swc-dock-shape {
+    width: 51px;
+    height: 51px;
+}
+
+:host(.is-collapsed:not(.is-docked)) .swc-dock-icon {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    font-size: 14px;
+}
+
+:host(.is-collapsed:not(.is-docked)) .swc-dock-shape path {
+    fill: rgb(113 97 232 / 58%);
+    stroke: rgb(203 195 255 / 48%);
+}
+
+:host(.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {
+    opacity: 0.9;
+}
+
+:host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-toggle {
+    width: 37px;
+    height: 37px;
+    opacity: 0.48;
+}
+
+:host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-shape {
+    width: 37px;
+    height: 37px;
+}
+
+:host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-icon {
+    left: 50%;
+    font-size: 12px;
+}
+
+:host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-shape path {
+    fill: rgb(113 97 232 / 42%);
+    stroke: rgb(203 195 255 / 32%);
+}
+
+:host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {
+    opacity: 0.72;
+}
+
+:host(.is-fullscreen) .swc-dock-toggle:hover {
+    opacity: 0.82;
+}
+
+:host(.is-fullscreen:not(.is-docked)) .swc-layer {
+    opacity: 0.55;
+    transition: opacity 140ms ease;
+}
+
+:host(.is-collapsed) .swc-layer {
+    visibility: hidden;
+}
+
+:host(.is-collapsed) .swc-layer .swc-panel.is-open {
+    visibility: visible;
+}
+
+:host(.is-collapsed) .swc-dock-toggle {
+    display: grid;
+    place-items: center;
+}
+
+:host(.is-fullscreen) {
+    z-index: 2147483647 !important;
+}
+
+.swc-panel {
+    position: absolute;
+    z-index: 9;
+    display: none;
+    width: min(290px, calc(100vw - 24px));
+    max-height: min(420px, calc(100vh - 24px));
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 14px;
+    border: 1px solid #595278;
+    border-radius: 14px;
+    background: #151827;
+    box-shadow: 0 12px 36px rgb(0 0 0 / 50%);
+    color: #eef0fb;
+    pointer-events: auto;
+}
+
+.swc-panel.is-open {
+    display: block;
+}
+
+.swc-panel h2 {
+    margin: 0 0 12px;
+    color: #f6f5ff;
+    font-size: 15px;
+}
+
+.swc-panel p,
+.swc-panel ol {
+    margin: 0;
+}
+
+.swc-form,
+.swc-history-panel {
+    display: grid;
+    gap: 10px;
+}
+
+.swc-form label {
+    display: grid;
+    gap: 6px;
+    color: #b6bbcf;
+}
+
+.swc-form input {
+    width: 100%;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid #42485e;
+    border-radius: 8px;
+    background: #202538;
+    color: #f4f4fb;
+    font: inherit;
+}
+
+.swc-panel button {
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: #2a3043;
+    color: #eceaff;
+}
+
+.swc-panel button:hover {
+    background: #3a4058;
+}
+
+.swc-panel button.swc-primary {
+    background: #7464ef;
+    color: white;
+    font-weight: 700;
+}
+
+.swc-panel button.swc-primary:hover {
+    background: #8578fa;
+}
+
+.swc-panel button.swc-danger {
+    color: #ffb8bd;
+}
+
+.swc-empty,
+.swc-history-time {
+    color: #aeb4c8;
+}
+
+.swc-history-list {
+    display: grid;
+    gap: 9px;
+    padding-left: 22px;
+}
+
+.swc-history-list li {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #202538;
+}
+
+.swc-history-list summary,
+.swc-history-list strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: #eeecff;
+    font-weight: 650;
+}
+
+.swc-history-list summary {
+    cursor: pointer;
+}
+
+.swc-url {
+    margin: 7px 0 !important;
+    color: #a69bff;
+    overflow-wrap: anywhere;
+    font-size: 11px;
+}
+
+.swc-history-time {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+}
+
+.swc-history-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.swc-toast {
+    position: absolute;
+    z-index: 12;
+    left: 50%;
+    bottom: -7px;
+    max-width: 290px;
+    padding: 6px 10px;
+    transform: translate(-50%, 100%);
+    border: 1px solid #555b72;
+    border-radius: 8px;
+    background: #171b2b;
+    box-shadow: 0 5px 15px rgb(0 0 0 / 40%);
+    color: #f1efff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+    white-space: nowrap;
+}
+
+.swc-toast.is-visible {
+    opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .swc-action,
+    .swc-progress-value,
+    .swc-toast {
+        transition: none;
+    }
+}

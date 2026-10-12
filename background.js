@@ -5,9 +5,24 @@ let pingTimer = null;
 let reconnectTimer = null;
 let nextPingId = 0;
 const pendingLatencyPings = new Map();
+const controllerContentScriptFiles = [
+    'controller/core/progress-ring.js',
+    'controller/animations/rotation.js',
+    'controller/player/skip-segments.js',
+    'controller/panels/create-room.js',
+    'controller/panels/join-room.js',
+    'controller/panels/shared-history.js',
+    'controller/panels/local-history.js',
+    'controller/styles/style-1/index.js',
+    'controller/core/controller-actions.js',
+    'controller/core/controller-manager.js',
+    'content.js',
+];
 
 const videoFrames = new Map();
 const injectionFrames = new Map();
+const activeControllerFrames = new Map();
+const pendingControllerFrameSwitches = new Map();
 const navigationNotificationPrefix = 'sync-watch-navigation-';
 const recommendationNotificationPrefix = 'sync-watch-recommendation-';
 const pendingSavedProgress = new Map();
@@ -52,6 +67,14 @@ const state = {
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
     pauseAfterAutoSwitch: false,
+    controllerSettings: {
+        style: 'style-1',
+        rotationEnabled: true,
+        position: null,
+        size: 168,
+        dockSide: 'right',
+        collapsed: true,
+    },
     pauseOnBuffer: false,
     pauseOnBufferDelay: 5,
     autoCorrectionEnabled: true,
@@ -101,6 +124,7 @@ const ready = chrome.storage.local
         'autoPauseReady',
         'autoPauseStartedNavigationId',
         'pauseAfterAutoSwitch',
+        'controllerSettings',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
         'autoCorrectionEnabled',
@@ -126,6 +150,30 @@ const ready = chrome.storage.local
     });
 
 function persist() {
+    state.controllerSettings = {
+        style: 'style-1',
+        rotationEnabled: state.controllerSettings?.rotationEnabled !== false,
+        size: Number.isFinite(Number(state.controllerSettings?.size))
+            ? Math.max(120, Math.min(240, Math.round(Number(state.controllerSettings.size))))
+            : 168,
+        dockSide: ['left', 'right'].includes(state.controllerSettings?.dockSide)
+            ? state.controllerSettings.dockSide
+            : Number.isFinite(state.controllerSettings?.position?.x) &&
+              Number.isFinite(state.controllerSettings?.position?.y)
+              ? null
+              : 'right',
+        collapsed:
+            state.controllerSettings?.collapsed === true ||
+            ['left', 'right'].includes(state.controllerSettings?.dockSide),
+        position: Number.isFinite(state.controllerSettings?.position?.x) &&
+            Number.isFinite(state.controllerSettings?.position?.y)
+            ? {
+                  x: state.controllerSettings.position.x,
+                  y: state.controllerSettings.position.y,
+              }
+            : null,
+    };
+
     chrome.storage.local.set({
         server: state.server,
         turnUrls: state.turnUrls,
@@ -161,6 +209,7 @@ function persist() {
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+        controllerSettings: state.controllerSettings,
         pauseOnBuffer: state.pauseOnBuffer,
         pauseOnBufferDelay: state.pauseOnBufferDelay,
         autoCorrectionEnabled: state.autoCorrectionEnabled,
@@ -608,7 +657,7 @@ async function reinjectRoomTab() {
 
     const injectedFrames = await chrome.scripting.executeScript({
         target: { tabId: state.tabId, allFrames: true },
-        files: ['content.js'],
+        files: controllerContentScriptFiles,
     });
 
     setTabMarker(state.tabId, true);
@@ -879,6 +928,80 @@ function selectVideoFrame(tabId, pageUrl = '') {
     const frame = bestVideoFrame(tabId, pageUrl);
     state.videoFrameId = frame?.frameId ?? 0;
     return frame;
+}
+
+function updateControllerFrame(tabId) {
+    const tabFrames = [...videoFrames.values()].filter(
+        (frame) => frame.tabId === tabId,
+    );
+    const activeFrame = tabFrames
+        .filter((frame) => frame.hasVideo)
+        .sort(
+            (a, b) =>
+                Number(b.readyState >= 2) - Number(a.readyState >= 2) ||
+                b.score - a.score,
+        )[0];
+
+    if (!activeFrame) return;
+
+    const currentFrameId = activeControllerFrames.get(tabId);
+    const nextFrameId = activeFrame.frameId;
+    const pendingSwitch = pendingControllerFrameSwitches.get(tabId);
+
+    if (pendingSwitch && pendingSwitch.frameId !== nextFrameId) {
+        clearTimeout(pendingSwitch.timer);
+        pendingControllerFrameSwitches.delete(tabId);
+    }
+
+    if (currentFrameId !== undefined && currentFrameId !== nextFrameId) {
+        if (!pendingControllerFrameSwitches.has(tabId)) {
+            const timer = setTimeout(() => {
+                pendingControllerFrameSwitches.delete(tabId);
+                const latestFrame = bestVideoFrame(tabId);
+                if (latestFrame?.frameId === nextFrameId) {
+                    setControllerFrame(tabId, nextFrameId);
+                }
+            }, 500);
+            pendingControllerFrameSwitches.set(tabId, {
+                frameId: nextFrameId,
+                timer,
+            });
+        }
+        return;
+    }
+
+    setControllerFrame(tabId, nextFrameId);
+}
+
+function setControllerFrame(tabId, activeFrameId) {
+    activeControllerFrames.set(tabId, activeFrameId);
+
+    const tabFrames = [...videoFrames.values()].filter(
+        (frame) => frame.tabId === tabId,
+    );
+    const activeFrame = tabFrames.find(
+        (frame) => frame.frameId === activeFrameId,
+    );
+
+    if (activeFrame) {
+        sendTab(
+            { type: 'CONTROLLER_ACTIVE', active: true },
+            activeFrame.frameId,
+            tabId,
+        );
+    }
+
+    for (const frame of tabFrames) {
+        if (frame.frameId === activeFrameId) continue;
+        sendTab(
+            {
+                type: 'CONTROLLER_ACTIVE',
+                active: false,
+            },
+            frame.frameId,
+            tabId,
+        );
+    }
 }
 
 function disconnectSocket() {
@@ -1920,6 +2043,168 @@ async function inspectActiveTab(tabId) {
     if (candidate) hostPageDetected(tabId, candidate);
 }
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const supportedMessages = new Set([
+        'GET_CONTROLLER_STATE',
+        'CREATE_ROOM',
+        'JOIN_ROOM',
+        'LEAVE',
+        'SAVE_PAGE_PROGRESS',
+        'OPEN_CONTROLLER_URL',
+        'REBIND_CURRENT_PLAYER',
+        'REBIND_PLAYER_RESULT',
+    ]);
+    if (!supportedMessages.has(message?.type)) return false;
+
+    ready.then(() => {
+        if (message.type === 'GET_CONTROLLER_STATE') {
+            sendResponse({
+                state: {
+                    room: state.room,
+                    role: state.role,
+                    connected: state.connected,
+                    memberCount: state.memberCount,
+                    roomLimit: state.roomLimit,
+                    serverConfigured: !!state.server,
+                    status: state.status,
+                    controllerSettings: state.controllerSettings,
+                    navigationHistory: state.navigationHistory,
+                    savedProgress: state.savedProgress,
+                    sharedNavigation: state.sharedNavigation,
+                    currentPlayback: state.currentPlayback,
+                },
+            });
+            return;
+        }
+
+        if (
+            message.type === 'CREATE_ROOM' ||
+            message.type === 'JOIN_ROOM' ||
+            message.type === 'LEAVE'
+        ) {
+            sendResponse({ success: true, pending: true });
+            return;
+        }
+
+        if (message.type === 'REBIND_PLAYER_RESULT') {
+            const tabId = sender.tab?.id;
+            const frameId = sender.frameId || 0;
+            if (message.success && Number.isInteger(tabId)) {
+                const frame = videoFrames.get(`${tabId}:${frameId}`);
+                if (frame) {
+                    if (state.room && tabId === state.tabId) {
+                        state.videoFrameId = frame.frameId;
+                        state.videoReady = isVideoFrameReady(frame);
+                        sendRoomTabState(frame.frameId);
+                        if (state.role === 'host') {
+                            sendTab(
+                                { type: 'GET_VIDEO_SNAPSHOT' },
+                                frame.frameId,
+                                tabId,
+                            );
+                        } else if (state.sharedNavigation?.id) {
+                            sendRoomEvent('snapshot-request', {
+                                navigationId: state.sharedNavigation.id,
+                            });
+                        }
+                        state.status = '当前标签页播放器已重新绑定。';
+                        publish();
+                    }
+                }
+            } else if (state.room && tabId === state.tabId) {
+                state.status = message.message || '当前标签页未找到播放器。';
+                publish();
+            }
+            return;
+        }
+
+        if (message.type === 'SAVE_PAGE_PROGRESS') {
+            const progress = message.progress || {};
+            const url = safePageUrl(progress.url || sender.tab?.url);
+            if (!url || !Number.isFinite(Number(progress.time))) {
+                sendResponse({
+                    success: false,
+                    message: '未检测到可保存的视频。',
+                });
+                return;
+            }
+
+            const item = {
+                id: crypto.randomUUID(),
+                title: String(progress.title || sender.tab?.title || '当前视频')
+                    .replace(/^\[一起看\]\s*/, '')
+                    .slice(0, 160),
+                url,
+                time: Math.max(0, Number(progress.time)),
+                duration: Math.max(0, Number(progress.duration) || 0),
+                savedAt: Date.now(),
+            };
+            state.savedProgress = [item, ...(state.savedProgress || [])].slice(
+                0,
+                15,
+            );
+            state.status = `已在本机保存「${item.title}」的播放进度。`;
+            publish();
+            sendResponse({ success: true, item });
+            return;
+        }
+
+        if (message.type === 'OPEN_CONTROLLER_URL') {
+            const url = safePageUrl(message.url);
+            if (!url) {
+                sendResponse({ success: false, message: '链接无效。' });
+                return;
+            }
+            chrome.tabs.create({ url }, () => {
+                sendResponse({ success: !chrome.runtime.lastError });
+            });
+            return;
+        }
+
+        const tabId = sender.tab?.id;
+        const frame = Number.isInteger(tabId)
+            ? bestVideoFrame(tabId)
+            : null;
+        if (!frame) {
+            sendResponse({
+                success: false,
+                message: '当前标签页未检测到可绑定的视频播放器。',
+            });
+            return;
+        }
+
+        if (state.room) {
+            const pageUrl = safePageUrl(frame.pageUrl || sender.tab?.url);
+            if (!pageUrl) {
+                sendResponse({ success: false, message: '无法读取当前视频页地址。' });
+                return;
+            }
+
+            switchRoomTab(tabId);
+            state.currentVideoUrl = pageUrl;
+            state.videoFrameId = frame.frameId;
+            state.videoReady = isVideoFrameReady(frame);
+            state.hostCandidate = null;
+            state.liveVideo = false;
+
+            if (state.role === 'host') {
+                sendRoomTabState(frame.frameId);
+                state.currentPlayback = null;
+            } else {
+                state.followingHost = false;
+            }
+            publish();
+        }
+
+        sendTab({ type: 'REBIND_PLAYER' }, frame.frameId, tabId);
+        sendResponse({ success: true, pending: true });
+    }).catch(() => {
+        sendResponse({ success: false, message: '操作失败，请重试。' });
+    });
+
+    return true;
+});
+
 chrome.runtime.onMessage.addListener((message, sender) => {
     ready.then(async () => {
         if (message.type === 'SAVE_CURRENT_PROGRESS') {
@@ -2045,6 +2330,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             };
 
             videoFrames.set(key, candidate);
+            updateControllerFrame(tabId);
             openSavedProgressWhenReady(tabId, frameId);
 
             if (state.role !== 'host' && awaitingInitialRoomPlayback) {
@@ -2718,11 +3004,60 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             return;
         }
 
+        if (message.type === 'SET_CONTROLLER_SETTINGS') {
+            const requested = message.settings || {};
+            const position = requested.position;
+            state.controllerSettings = {
+                style: 'style-1',
+                rotationEnabled:
+                    typeof requested.rotationEnabled === 'boolean'
+                        ? requested.rotationEnabled
+                        : state.controllerSettings.rotationEnabled,
+                size: Number.isFinite(Number(requested.size))
+                    ? Math.max(120, Math.min(240, Math.round(Number(requested.size))))
+                    : state.controllerSettings.size,
+                dockSide:
+                    requested.dockSide === 'left' || requested.dockSide === 'right'
+                        ? requested.dockSide
+                        : requested.dockSide === null
+                          ? null
+                          : state.controllerSettings.dockSide,
+                collapsed:
+                    requested.dockSide === 'left' || requested.dockSide === 'right'
+                        ? true
+                        : typeof requested.collapsed === 'boolean'
+                          ? requested.collapsed
+                          : state.controllerSettings.collapsed,
+                position:
+                    Number.isFinite(position?.x) &&
+                    Number.isFinite(position?.y)
+                        ? {
+                              x: Math.max(0, Math.round(position.x)),
+                              y: Math.max(0, Math.round(position.y)),
+                          }
+                        : null,
+            };
+            publish();
+            return;
+        }
+
         if (message.type === 'CREATE_ROOM') {
             roomVideoNavigation = null;
             awaitingInitialRoomPlayback = false;
             initialRoomSnapshotRequested = false;
             state.server = message.server || state.server;
+            const requestedTabId = Number(message.tabId);
+            const tabId = Number.isInteger(requestedTabId)
+                ? requestedTabId
+                : sender.tab?.id;
+            if (!state.server) {
+                setStatus('请先在扩展弹窗中配置服务器地址。');
+                return;
+            }
+            if (!Number.isInteger(tabId)) {
+                setStatus('无法识别当前标签页。');
+                return;
+            }
             state.room = Math.random().toString(36).slice(2, 8).toUpperCase();
             state.role = 'host';
             state.autoShare = false;
@@ -2730,9 +3065,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.roomLimit = Number.isInteger(requestedRoomLimit)
                 ? Math.max(4, Math.min(16, requestedRoomLimit))
                 : 4;
-            switchRoomTab(message.tabId);
+            switchRoomTab(tabId);
 
-            const tab = await chrome.tabs.get(message.tabId).catch(() => null);
+            const tab = await chrome.tabs.get(tabId).catch(() => null);
             state.currentVideoUrl = safePageUrl(tab?.url) || '';
             state.currentPlayback = null;
             state.liveVideo = false;
@@ -2800,12 +3135,24 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             }
 
             state.server = message.server || state.server;
+            const requestedTabId = Number(message.tabId);
+            const tabId = Number.isInteger(requestedTabId)
+                ? requestedTabId
+                : sender.tab?.id;
+            if (!state.server) {
+                setStatus('请先在扩展弹窗中配置服务器地址。');
+                return;
+            }
+            if (!Number.isInteger(tabId)) {
+                setStatus('无法识别当前标签页。');
+                return;
+            }
             state.room = roomCode;
             state.role = 'guest';
             state.autoShare = false;
-            switchRoomTab(message.tabId);
+            switchRoomTab(tabId);
 
-            const tab = await chrome.tabs.get(message.tabId).catch(() => null);
+            const tab = await chrome.tabs.get(tabId).catch(() => null);
             state.currentVideoUrl = tab?.url || '';
             state.currentPlayback = null;
             state.liveVideo = false;
@@ -2932,6 +3279,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (roomVideoNavigation?.tabId === tabId) roomVideoNavigation = null;
     pendingSavedProgress.delete(tabId);
+    activeControllerFrames.delete(tabId);
+    const pendingFrameSwitch = pendingControllerFrameSwitches.get(tabId);
+    if (pendingFrameSwitch) clearTimeout(pendingFrameSwitch.timer);
+    pendingControllerFrameSwitches.delete(tabId);
 
     for (const [key, frame] of videoFrames) {
         if (frame.tabId === tabId) videoFrames.delete(key);

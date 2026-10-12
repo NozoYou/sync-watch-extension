@@ -527,6 +527,45 @@ button:hover {
     padding-top: 5px;
 }
 
+.controller-settings-panel {
+    display: grid;
+    gap: 7px;
+    margin-bottom: 9px;
+    padding: 9px;
+    border: 1px solid #343a50;
+    border-radius: 8px;
+    background: #1c2131;
+}
+
+.controller-settings-panel > strong {
+    color: #d4ceff;
+    font-size: 11px;
+}
+
+.controller-settings-panel > label:not(.setting-checkbox) {
+    color: #9fa7bc;
+    font-size: 10px;
+}
+
+.controller-settings-panel select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #3d4359;
+    border-radius: 7px;
+    background: #252b3d;
+    color: #e9eaf3;
+}
+
+.controller-settings-panel input[type='range'] {
+    width: 100%;
+    accent-color: #8071f2;
+}
+
+.controller-settings-panel button {
+    justify-self: start;
+    padding: 6px 8px;
+}
+
 .host-sharing-settings {
     display: flex;
     align-items: center;

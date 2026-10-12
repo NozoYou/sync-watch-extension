@@ -122,6 +122,26 @@
             <details id="playback-settings" class="feature-menu">
                 <summary>播放与标签页设置</summary>
                 <div class="feature-menu-content">
+                    <section class="controller-settings-panel">
+                        <strong>页面圆盘控制器</strong>
+                        <label for="controller-size">圆盘大小：<output id="controller-size-value">168</output> px</label>
+                        <input
+                            id="controller-size"
+                            type="range"
+                            min="120"
+                            max="240"
+                            step="1"
+                            value="168"
+                        />
+                        <label class="setting-checkbox" for="controller-rotation">
+                            <input id="controller-rotation" type="checkbox" />
+                            播放时旋转装饰环
+                        </label>
+                        <button id="reset-controller-position" class="quiet" type="button">
+                            恢复圆盘默认位置
+                        </button>
+                    </section>
+
                     <label class="setting-checkbox" for="follow-prompt-enabled">
                         <input id="follow-prompt-enabled" type="checkbox" />
                         跟随弹窗
