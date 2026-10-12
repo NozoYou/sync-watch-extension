@@ -69,8 +69,7 @@
                     class="icon-button saved-progress-toggle"
                     type="button"
                     aria-label="本地保存的进度"
-                    aria-expanded="false"
-                    title="本地保存的进度"
+                    title="跳转到本地保存的进度"
                 >
                     ▣
                 </button>
@@ -87,11 +86,11 @@
             </div>
         </header>
 
-        <details id="saved-progress-panel" class="saved-progress-panel hidden">
+        <details id="saved-progress-panel" class="saved-progress-panel">
             <summary id="saved-progress-summary">本地保存的进度</summary>
             <div class="saved-progress-content">
-                <p id="saved-progress-empty" class="small hidden">
-                    保存的进度只保存在本机扩展中。
+                <p id="saved-progress-empty" class="small">
+                    暂无本地保存的进度。记录只保存在本机扩展中。
                 </p>
                 <div id="saved-progress-list"></div>
             </div>
@@ -124,6 +123,10 @@
                 <div class="feature-menu-content">
                     <section class="controller-settings-panel">
                         <strong>页面圆盘控制器</strong>
+                        <label class="setting-checkbox" for="controller-enabled">
+                            <input id="controller-enabled" type="checkbox" />
+                            在网页显示圆球组件
+                        </label>
                         <label for="controller-size">圆盘大小：<output id="controller-size-value">168</output> px</label>
                         <input
                             id="controller-size"
@@ -133,6 +136,18 @@
                             step="1"
                             value="168"
                         />
+                        <label for="skip-duration">跳过时长（秒）</label>
+                        <input
+                            id="skip-duration"
+                            type="number"
+                            min="1"
+                            max="3600"
+                            step="1"
+                            value="85"
+                        />
+                        <p class="small">
+                            圆盘上的跳过按钮会向前跳过这段时间，默认 85 秒（1 分 25 秒）。
+                        </p>
                         <label class="setting-checkbox" for="controller-rotation">
                             <input id="controller-rotation" type="checkbox" />
                             播放时旋转装饰环
@@ -399,13 +414,19 @@
         </details>
 
         <details id="recommendations-panel" class="feature-menu recommendations-panel hidden">
-            <summary id="recommendations-summary">成员推荐</summary>
+            <summary id="recommendations-summary">
+                成员推荐
+            </summary>
             <div id="recommendations-list"></div>
         </details>
 
         <p id="status" role="status">
             打开视频页面后创建房间，或输入朋友分享的房间码加入。
         </p>
+
+        <footer class="version-footer">
+            版本 <span id="extension-version"></span>
+        </footer>
 
         <script src="popup.js"></script>
     </body>

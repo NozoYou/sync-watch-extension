@@ -36,6 +36,7 @@
         let dockToggle = null;
         let dockShape = null;
         let dockPath = null;
+        let contextMenu = null;
 
         function ensureHost() {
             if (host) return;
@@ -44,6 +45,11 @@
             host.id = '__sync_watch_controller';
             host.className = 'swc-host';
             shadow = host.attachShadow({ mode: 'closed' });
+            host.addEventListener(
+                'contextmenu',
+                openControllerContextMenu,
+                { signal: globalEvents.signal },
+            );
 
             for (const path of [
                 'controller/styles/shared.css',
@@ -92,6 +98,23 @@
                 event.stopPropagation();
                 beginDrag(event);
             });
+
+            contextMenu = documentRef.createElement('div');
+            contextMenu.className = 'swc-context-menu';
+            contextMenu.hidden = true;
+            contextMenu.setAttribute('role', 'menu');
+            const closeButton = documentRef.createElement('button');
+            closeButton.type = 'button';
+            closeButton.textContent = '关闭圆球';
+            closeButton.title = '可在扩展设置中重新开启';
+            closeButton.addEventListener('click', () => {
+                contextMenu.hidden = true;
+                chrome.runtime.sendMessage({
+                    type: 'SET_CONTROLLER_SETTINGS',
+                    settings: { enabled: false },
+                }).catch(() => {});
+            });
+            contextMenu.append(closeButton);
             host.addEventListener(
                 'pointerleave',
                 handleControllerPointerLeave,
@@ -138,6 +161,7 @@
             layer.append(panel, toast);
             shadow.append(layer);
             shadow.append(dockToggle);
+            shadow.append(contextMenu);
             documentRef.documentElement.append(host);
 
             documentRef.addEventListener(
@@ -527,14 +551,44 @@
         }
 
         function closeOnOutsidePointer(event) {
-            if (!activePanel || !host) return;
+            if (!host) return;
             const path = event.composedPath?.() || [];
             if (path.includes(host) || path.includes(shadow)) return;
-            closePanel();
+            if (contextMenu) contextMenu.hidden = true;
+            if (activePanel) closePanel();
         }
 
         function closeOnEscape(event) {
-            if (event.key === 'Escape') closePanel();
+            if (event.key !== 'Escape') return;
+            if (contextMenu) contextMenu.hidden = true;
+            closePanel();
+        }
+
+        function openControllerContextMenu(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!contextMenu || !host) return;
+
+            const hostRect = host.getBoundingClientRect();
+            const menuWidth = 148;
+            const menuHeight = 42;
+            const left = Math.max(
+                8 - hostRect.left,
+                Math.min(
+                    windowRef.innerWidth - menuWidth - hostRect.left,
+                    event.clientX - hostRect.left,
+                ),
+            );
+            const top = Math.max(
+                8 - hostRect.top,
+                Math.min(
+                    windowRef.innerHeight - menuHeight - hostRect.top,
+                    event.clientY - hostRect.top,
+                ),
+            );
+            contextMenu.style.left = `${left}px`;
+            contextMenu.style.top = `${top}px`;
+            contextMenu.hidden = false;
         }
 
         function positionPanel() {
@@ -838,7 +892,10 @@
                 return;
             }
             if (name === 'skip-opening-ending') {
-                actions.skipOpeningEnding();
+                actions.skipOpeningEnding(
+                    state.controllerSettings?.skipSeconds ?? 85,
+                    state,
+                );
             }
         }
 
@@ -923,6 +980,7 @@
             if (!state.controllerSettings) {
                 state.controllerSettings = {
                     style: 'style-1',
+                    enabled: true,
                     rotationEnabled: true,
                     position: null,
                     size: 168,
@@ -955,7 +1013,9 @@
                 state.controllerActive === true ||
                 (nextState && 'controllerActive' in nextState)
             ) {
-                active = state.controllerActive === true;
+                active =
+                    state.controllerActive === true &&
+                    state.controllerSettings.enabled !== false;
             }
             host.hidden = !active;
             if (activePanel && getPanelSignature() !== lastPanelSignature) {
@@ -964,7 +1024,9 @@
         }
 
         function setActive(value) {
-            active = value === true;
+            active =
+                value === true &&
+                state.controllerSettings?.enabled !== false;
             state.controllerActive = active;
             if (active) ensureHost();
             if (host) host.hidden = !active;

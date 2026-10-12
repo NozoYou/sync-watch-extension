@@ -51,7 +51,15 @@ function renderPlaybackProgress() {
     panel.title = videoUrl ? '点击在当前标签页打开房间正在播放的视频' : '';
 
     if (!currentPlayback) {
-        area.classList.add('hidden');
+        const isInRoom = !!lastRenderedState?.room;
+        area.classList.toggle('hidden', !isInRoom);
+        if (isInRoom) {
+            getElement('room-playback-title').textContent = '等待房主分享视频';
+            getElement('room-playback-status').textContent = '等待中';
+            getElement('room-playback-current').textContent = '0:00';
+            getElement('room-playback-duration').textContent = '—';
+            getElement('room-playback-progress').value = 0;
+        }
         return;
     }
 
@@ -467,7 +475,7 @@ function renderSelfInjectionControl(state) {
     refreshButton.setAttribute('aria-label', refreshButton.title);
 }
 
-function renderShareHistory(history = []) {
+function renderShareHistory(history = [], roomId = '') {
     const panels = [
         {
             panel: getElement('share-history'),
@@ -483,7 +491,7 @@ function renderShareHistory(history = []) {
         },
     ];
     const newestFirst = [...history].slice(0, 15);
-    const signature = JSON.stringify(newestFirst);
+    const signature = JSON.stringify({ roomId, history: newestFirst });
 
     // Keep expanded entries open during unrelated popup state updates.
     if (signature === renderedHistorySignature) return;
@@ -565,7 +573,7 @@ function renderShareHistory(history = []) {
         const isDisabledHistory = view.panel.id === 'share-history';
         view.panel.classList.toggle(
             'hidden',
-            isDisabledHistory || newestFirst.length === 0,
+            isDisabledHistory,
         );
         view.olderList.classList.toggle('hidden', older.length === 0);
 
@@ -584,6 +592,13 @@ function renderShareHistory(history = []) {
                 view.openInCurrentTab,
             );
         }
+
+        if (!isDisabledHistory && newestFirst.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'small empty-feature-state';
+            empty.textContent = '房主分享的视频会显示在这里。';
+            view.recentList.append(empty);
+        }
     }
 }
 
@@ -594,10 +609,18 @@ function renderRecommendations(state) {
         ? (state.receivedRecommendations || []).slice(0, 20)
         : [];
 
-    panel.classList.toggle('hidden', items.length === 0);
+    const isHostInRoom = state.role === 'host' && !!state.room;
+    panel.classList.toggle('hidden', !isHostInRoom);
     getElement('recommendations-summary').textContent =
         `成员推荐（${items.length}）`;
     list.replaceChildren();
+
+    if (isHostInRoom && items.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'small empty-feature-state';
+        empty.textContent = '暂无成员推荐。成员可点击右上角的推荐按钮发送视频。';
+        list.append(empty);
+    }
 
     for (const item of items) {
         const row = document.createElement('div');
@@ -677,11 +700,16 @@ function render(state) {
     getElement('display-name-label').textContent = savedDisplayName || '成员';
     updateLocalGreeting();
     const controllerSettings = state.controllerSettings || {};
+    getElement('controller-enabled').checked =
+        controllerSettings.enabled !== false;
     getElement('controller-rotation').checked =
         controllerSettings.rotationEnabled !== false;
     const controllerSize = Number(controllerSettings.size) || 168;
     getElement('controller-size').value = String(controllerSize);
     getElement('controller-size-value').value = String(controllerSize);
+    getElement('skip-duration').value = String(
+        Number(controllerSettings.skipSeconds) || 85,
+    );
 
     const displayNameInput = getElement('display-name');
     if (pendingDisplayNameSave !== null) {
@@ -787,10 +815,11 @@ function render(state) {
             ? '卡顿等待时长由房主管理。'
             : '卡顿开关权限与等待时长由房主管理。';
         getElement('pause-on-buffer-owner').classList.toggle('hidden', isHost);
-        renderShareHistory(state.navigationHistory || []);
+        renderShareHistory(state.navigationHistory || [], state.room);
         renderRecommendations(state);
 
     } else {
+        renderShareHistory([], '');
         getElement('room-box').classList.add('hidden');
         getElement('room-member-list').replaceChildren();
         getElement('room-playback-area').classList.add('hidden');
@@ -867,6 +896,9 @@ chrome.storage.local.get(
     render,
 );
 
+getElement('extension-version').textContent =
+    chrome.runtime.getManifest().version;
+
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'STATE') render(message.state);
 });
@@ -914,6 +946,12 @@ function updateControllerSettings(changes) {
     });
 }
 
+getElement('controller-enabled').addEventListener('change', () => {
+    updateControllerSettings({
+        enabled: getElement('controller-enabled').checked,
+    });
+});
+
 getElement('controller-rotation').addEventListener('change', () => {
     updateControllerSettings({
         rotationEnabled: getElement('controller-rotation').checked,
@@ -924,6 +962,15 @@ getElement('controller-size').addEventListener('input', () => {
     const size = Number(getElement('controller-size').value);
     getElement('controller-size-value').value = String(size);
     updateControllerSettings({ size });
+});
+
+getElement('skip-duration').addEventListener('change', () => {
+    const requested = Number(getElement('skip-duration').value);
+    const seconds = Number.isFinite(requested)
+        ? Math.max(1, Math.min(3600, Math.round(requested)))
+        : 85;
+    getElement('skip-duration').value = String(seconds);
+    updateControllerSettings({ skipSeconds: seconds });
 });
 
 getElement('reset-controller-position').addEventListener('click', () => {
@@ -1071,14 +1118,6 @@ const savedProgressPanel = getElement('saved-progress-panel');
 function setMenuOpen(isOpen) {
     mainMenuPanel.classList.toggle('hidden', !isOpen);
     menuToggle.setAttribute('aria-expanded', String(isOpen));
-    if (isOpen) setSavedProgressOpen(false);
-}
-
-function setSavedProgressOpen(isOpen) {
-    savedProgressPanel.classList.toggle('hidden', !isOpen);
-    savedProgressPanel.open = isOpen;
-    savedProgressToggle.setAttribute('aria-expanded', String(isOpen));
-    if (isOpen) setMenuOpen(false);
 }
 
 menuToggle.addEventListener('click', () => {
@@ -1086,7 +1125,8 @@ menuToggle.addEventListener('click', () => {
 });
 
 savedProgressToggle.addEventListener('click', () => {
-    setSavedProgressOpen(savedProgressPanel.classList.contains('hidden'));
+    savedProgressPanel.open = true;
+    savedProgressPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 document.addEventListener('click', (event) => {
@@ -1096,19 +1136,11 @@ document.addEventListener('click', (event) => {
     ) {
         setMenuOpen(false);
     }
-
-    if (
-        !savedProgressPanel.contains(event.target) &&
-        !savedProgressToggle.contains(event.target)
-    ) {
-        setSavedProgressOpen(false);
-    }
 });
 
 document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
         setMenuOpen(false);
-        setSavedProgressOpen(false);
     }
 });
 

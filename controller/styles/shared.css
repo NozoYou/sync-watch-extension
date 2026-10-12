@@ -227,6 +227,41 @@
     transform: translate(-50%, -50%);
 }
 
+.swc-context-menu {
+    position: absolute;
+    z-index: 30;
+    min-width: 148px;
+    padding: 4px;
+    border: 1px solid #595278;
+    border-radius: 10px;
+    background: #191c2b;
+    box-shadow: 0 6px 22px rgb(0 0 0 / 38%);
+    pointer-events: auto;
+}
+
+.swc-context-menu[hidden] {
+    display: none;
+}
+
+.swc-context-menu button {
+    width: 100%;
+    min-height: 34px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #f1f2fb;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.swc-context-menu button:hover,
+.swc-context-menu button:focus-visible {
+    outline: none;
+    background: #302d49;
+}
+
 :host(.is-docked) {
     transform: none;
 }

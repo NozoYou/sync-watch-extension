@@ -69,7 +69,9 @@ const state = {
     pauseAfterAutoSwitch: false,
     controllerSettings: {
         style: 'style-1',
+        enabled: true,
         rotationEnabled: true,
+        skipSeconds: 85,
         position: null,
         size: 168,
         dockSide: 'right',
@@ -152,7 +154,19 @@ const ready = chrome.storage.local
 function persist() {
     state.controllerSettings = {
         style: 'style-1',
+        enabled: state.controllerSettings?.enabled !== false,
         rotationEnabled: state.controllerSettings?.rotationEnabled !== false,
+        skipSeconds: Number.isFinite(
+            Number(state.controllerSettings?.skipSeconds),
+        )
+            ? Math.max(
+                  1,
+                  Math.min(
+                      3600,
+                      Math.round(Number(state.controllerSettings.skipSeconds)),
+                  ),
+              )
+            : 85,
         size: Number.isFinite(Number(state.controllerSettings?.size))
             ? Math.max(120, Math.min(240, Math.round(Number(state.controllerSettings.size))))
             : 168,
@@ -934,13 +948,15 @@ function updateControllerFrame(tabId) {
     const tabFrames = [...videoFrames.values()].filter(
         (frame) => frame.tabId === tabId,
     );
-    const activeFrame = tabFrames
+    const videoFrame = tabFrames
         .filter((frame) => frame.hasVideo)
         .sort(
             (a, b) =>
                 Number(b.readyState >= 2) - Number(a.readyState >= 2) ||
                 b.score - a.score,
         )[0];
+    // Keep the controller available on ordinary pages that do not contain video.
+    const activeFrame = videoFrame || tabFrames.find((frame) => frame.frameId === 0);
 
     if (!activeFrame) return;
 
@@ -976,27 +992,24 @@ function updateControllerFrame(tabId) {
 function setControllerFrame(tabId, activeFrameId) {
     activeControllerFrames.set(tabId, activeFrameId);
 
+    syncControllerVisibility(tabId);
+}
+
+function syncControllerVisibility(tabId) {
+    const activeFrameId = activeControllerFrames.get(tabId);
+    if (activeFrameId === undefined) return;
+
     const tabFrames = [...videoFrames.values()].filter(
         (frame) => frame.tabId === tabId,
     );
-    const activeFrame = tabFrames.find(
-        (frame) => frame.frameId === activeFrameId,
-    );
-
-    if (activeFrame) {
-        sendTab(
-            { type: 'CONTROLLER_ACTIVE', active: true },
-            activeFrame.frameId,
-            tabId,
-        );
-    }
 
     for (const frame of tabFrames) {
-        if (frame.frameId === activeFrameId) continue;
         sendTab(
             {
                 type: 'CONTROLLER_ACTIVE',
-                active: false,
+                active:
+                    state.controllerSettings?.enabled !== false &&
+                    frame.frameId === activeFrameId,
             },
             frame.frameId,
             tabId,
@@ -2068,6 +2081,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     serverConfigured: !!state.server,
                     status: state.status,
                     controllerSettings: state.controllerSettings,
+                    canSeek:
+                        state.role === 'host' ||
+                        !!getMemberSettings(state.clientId).canSeek,
                     navigationHistory: state.navigationHistory,
                     savedProgress: state.savedProgress,
                     sharedNavigation: state.sharedNavigation,
@@ -3009,10 +3025,23 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             const position = requested.position;
             state.controllerSettings = {
                 style: 'style-1',
+                enabled:
+                    typeof requested.enabled === 'boolean'
+                        ? requested.enabled
+                        : state.controllerSettings.enabled !== false,
                 rotationEnabled:
                     typeof requested.rotationEnabled === 'boolean'
                         ? requested.rotationEnabled
                         : state.controllerSettings.rotationEnabled,
+                skipSeconds: Number.isFinite(Number(requested.skipSeconds))
+                    ? Math.max(
+                          1,
+                          Math.min(
+                              3600,
+                              Math.round(Number(requested.skipSeconds)),
+                          ),
+                      )
+                    : state.controllerSettings.skipSeconds ?? 85,
                 size: Number.isFinite(Number(requested.size))
                     ? Math.max(120, Math.min(240, Math.round(Number(requested.size))))
                     : state.controllerSettings.size,
@@ -3038,6 +3067,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                         : null,
             };
             publish();
+            for (const tabId of activeControllerFrames.keys()) {
+                syncControllerVisibility(tabId);
+            }
             return;
         }
 

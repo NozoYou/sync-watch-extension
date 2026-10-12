@@ -57,11 +57,35 @@
                 else if (response) showMessage(response.message || '未找到播放器。');
                 return response?.success === true;
             },
-            skipOpeningEnding() {
-                const result = controller.skipSegments?.skipCurrent() || {
-                    success: false,
-                    message: '暂无可跳过片段。',
-                };
+            skipOpeningEnding(seconds, state = {}) {
+                if (state.room && state.role !== 'host' && !state.canSeek) {
+                    showMessage('房主尚未授予你调整进度的权限。');
+                    return false;
+                }
+
+                const video = getVideo();
+                const result =
+                    controller.skipSegments?.skipCurrent(video, seconds) || {
+                        success: false,
+                        message: '当前无法跳过。',
+                    };
+
+                if (result.success && state.room && state.connected) {
+                    send({
+                        type: 'VIDEO_OUT',
+                        videoState: {
+                            action: 'seek',
+                            time: result.targetTime,
+                            paused: video.paused,
+                            rate: video.playbackRate,
+                            duration: video.duration,
+                            at: Date.now(),
+                            url: location.href,
+                            title: document.title,
+                            manualControl: true,
+                        },
+                    });
+                }
                 showMessage(result.message);
                 return result.success;
             },

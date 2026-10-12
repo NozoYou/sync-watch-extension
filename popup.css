@@ -53,17 +53,22 @@ header {
 }
 
 .saved-progress-panel {
-    position: absolute;
-    z-index: 21;
-    top: 64px;
-    right: 10px;
-    width: 370px;
-    max-height: calc(100vh - 76px);
-    overflow-y: auto;
-    margin: 0;
+    margin-top: 10px;
+    padding: 9px 11px;
     border: 1px solid #3b4058;
+    border-radius: 8px;
     background: #151a27;
-    box-shadow: 0 12px 30px #0009;
+}
+
+.feature-section-title {
+    margin: 0;
+    color: #c9c4ff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.feature-menu > .feature-section-title {
+    margin-bottom: 8px;
 }
 
 .main-menu-panel > details {
@@ -505,6 +510,13 @@ button:hover {
     margin-top: 10px;
 }
 
+.empty-feature-state {
+    margin: 8px 0 4px;
+    padding: 8px;
+    border-radius: 7px;
+    background: rgb(255 255 255 / 3%);
+}
+
 .feature-menu {
     border: 1px solid #2b3245;
     background: #191e2c;
@@ -548,6 +560,15 @@ button:hover {
 }
 
 .controller-settings-panel select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #3d4359;
+    border-radius: 7px;
+    background: #252b3d;
+    color: #e9eaf3;
+}
+
+.controller-settings-panel input[type='number'] {
     width: 100%;
     padding: 6px 8px;
     border: 1px solid #3d4359;
@@ -1006,4 +1027,13 @@ details textarea {
     margin: 13px 0 4px;
     color: #aab1c2;
     font-size: 11px;
+}
+
+.version-footer {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #282e3e;
+    color: #737c91;
+    font-size: 10px;
+    text-align: center;
 }

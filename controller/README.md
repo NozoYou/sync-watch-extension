@@ -1,7 +1,10 @@
 # Floating controller modules
 
-The floating controller is an optional page UI. It reuses the existing room
-messages and local progress storage; it does not create a second room protocol.
+The floating controller is a page UI enabled by default on pages where Chrome
+allows the extension to run. It reuses the existing room messages and local
+progress storage; it does not create a second room protocol. Users can disable
+it in the extension's playback and tab settings or right-click the controller
+and choose **Close controller**. The extension settings can enable it again.
 
 ## Module map
 
@@ -15,8 +18,18 @@ messages and local progress storage; it does not create a second room protocol.
   decorative rotation only.
 - `styles/style-1/` renders the classic sector controller layout.
 - `panels/` contains the shared room, join, and history panel renderers.
-- `player/skip-segments.js` is an OP/ED placeholder. Segment discovery and
-  seeking are intentionally not implemented.
+- `player/skip-segments.js` provides the configurable seek action. OP/ED
+  detection and timestamp data are intentionally not implemented.
+
+## Interaction
+
+- The controller starts as a compact circle. Click it to expand the controls;
+  drag it to move or dock it at either screen edge.
+- Change its size and optional rotation in the extension popup.
+- Right-click the circle or expanded controller to open the close command.
+- The popup's local progress, room share history, and member recommendation
+  sections use native `details` and `summary` disclosure controls. Their
+  headings remain visible while their contents start collapsed.
 
 ## Loading order
 

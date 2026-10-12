@@ -1045,6 +1045,7 @@
         controllerSettings: {
             style: 'style-1',
             rotationEnabled: true,
+            skipSeconds: 85,
             position: null,
             dockSide: 'right',
         },

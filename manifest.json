@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.10.14",
+    "version": "0.11.1",
     "description": "和朋友的视频同步播放插件。",
     "permissions": [
         "activeTab",
