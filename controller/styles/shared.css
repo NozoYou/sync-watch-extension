@@ -52,6 +52,8 @@
     z-index: 2;
     cursor: grab;
     touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .swc-progress-ring,
@@ -100,6 +102,34 @@
     border-radius: 50%;
 }
 
+.swc-room-code {
+    position: absolute;
+    z-index: 11;
+    top: calc(100% + 6px);
+    left: 50%;
+    max-width: calc(100vw - 24px);
+    padding: 6px 10px;
+    transform: translateX(-50%);
+    border: 1px solid #595278;
+    border-radius: 999px;
+    background: #171b2b;
+    box-shadow: 0 5px 15px rgb(0 0 0 / 35%);
+    color: #d5d0ff;
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.swc-room-code[hidden] {
+    display: none;
+}
+
+.swc-room-code:hover {
+    background: #26223d;
+    color: #fff;
+}
+
 .swc-action,
 .swc-center-action,
 .swc-panel button {
@@ -115,6 +145,12 @@
 .swc-panel input:focus-visible {
     outline: 2px solid #c5bcff;
     outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+[role='button']:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
 }
 
 .swc-action {
@@ -543,6 +579,10 @@
     pointer-events: none;
     transition: opacity 140ms ease;
     white-space: nowrap;
+}
+
+:host(.has-room) .swc-toast {
+    bottom: -45px;
 }
 
 .swc-toast.is-visible {

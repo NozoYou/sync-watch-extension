@@ -37,6 +37,7 @@
         let dockShape = null;
         let dockPath = null;
         let contextMenu = null;
+        let roomCodeButton = null;
 
         function ensureHost() {
             if (host) return;
@@ -45,11 +46,6 @@
             host.id = '__sync_watch_controller';
             host.className = 'swc-host';
             shadow = host.attachShadow({ mode: 'closed' });
-            host.addEventListener(
-                'contextmenu',
-                openControllerContextMenu,
-                { signal: globalEvents.signal },
-            );
 
             for (const path of [
                 'controller/styles/shared.css',
@@ -115,6 +111,11 @@
                 }).catch(() => {});
             });
             contextMenu.append(closeButton);
+            shadow.addEventListener(
+                'contextmenu',
+                openControllerContextMenu,
+                { capture: true, signal: globalEvents.signal },
+            );
             host.addEventListener(
                 'pointerleave',
                 handleControllerPointerLeave,
@@ -153,12 +154,18 @@
             panel.setAttribute('role', 'region');
             panel.setAttribute('aria-live', 'polite');
 
+            roomCodeButton = documentRef.createElement('button');
+            roomCodeButton.type = 'button';
+            roomCodeButton.className = 'swc-room-code';
+            roomCodeButton.hidden = true;
+            roomCodeButton.addEventListener('click', copyRoomCode);
+
             toast = documentRef.createElement('div');
             toast.className = 'swc-toast';
             toast.setAttribute('role', 'status');
             toast.setAttribute('aria-live', 'polite');
 
-            layer.append(panel, toast);
+            layer.append(panel, roomCodeButton, toast);
             shadow.append(layer);
             shadow.append(dockToggle);
             shadow.append(contextMenu);
@@ -237,7 +244,10 @@
         function restorePosition() {
             const saved = state.controllerSettings?.position;
             const defaultX = Math.max(12, windowRef.innerWidth - size - 12);
-            const defaultY = Math.max(12, windowRef.innerHeight / 2 - size / 2);
+            const defaultY = Math.max(
+                12,
+                windowRef.innerHeight / 2 - size / 2 + 200,
+            );
             dockSide = ['left', 'right'].includes(state.controllerSettings?.dockSide)
                 ? state.controllerSettings.dockSide
                 : Number.isFinite(saved?.x) && Number.isFinite(saved?.y)
@@ -308,9 +318,14 @@
                 : isFullscreen ? 37 : 51;
             const visualSize = compact ? compactSize : size;
             const offset = compact ? (size - visualSize) / 2 : 0;
+            const roomCodeHeight = state.room && !compact ? 40 : 0;
             const maxY = Math.max(
                 margin - offset,
-                windowRef.innerHeight - visualSize - safeBottom - offset,
+                windowRef.innerHeight -
+                    visualSize -
+                    safeBottom -
+                    offset -
+                    roomCodeHeight,
             );
             const maxX = Math.max(
                 margin - offset,
@@ -799,10 +814,8 @@
             let content = null;
             if (activePanel === 'create-room') {
                 if (state.room) {
-                    content = messagePanel(
-                        doc,
-                        '当前已在房间中，请先从扩展弹窗离开房间。',
-                    );
+                    closePanel();
+                    return;
                 } else if (!(state.serverConfigured || state.server)) {
                     content = messagePanel(
                         doc,
@@ -815,10 +828,8 @@
                 }
             } else if (activePanel === 'join-room') {
                 if (state.room) {
-                    content = messagePanel(
-                        doc,
-                        '当前已在房间中，请先从扩展弹窗离开房间。',
-                    );
+                    closePanel();
+                    return;
                 } else if (!(state.serverConfigured || state.server)) {
                     content = messagePanel(
                         doc,
@@ -856,6 +867,32 @@
             if (content) panel.append(content);
             lastPanelSignature = getPanelSignature();
             positionPanel();
+        }
+
+        async function copyRoomCode() {
+            const roomCode = String(state.room || '').trim();
+            if (!roomCode) return;
+
+            let copied = false;
+            try {
+                await windowRef.navigator.clipboard.writeText(roomCode);
+                copied = true;
+            } catch {
+                try {
+                    const temporaryInput = documentRef.createElement('textarea');
+                    temporaryInput.value = roomCode;
+                    temporaryInput.style.position = 'fixed';
+                    temporaryInput.style.opacity = '0';
+                    documentRef.body.append(temporaryInput);
+                    temporaryInput.select();
+                    copied = documentRef.execCommand('copy');
+                    temporaryInput.remove();
+                } catch {
+                    copied = false;
+                }
+            }
+
+            showMessage(copied ? '房间码已复制。' : '复制失败，请重试。');
         }
 
         function messagePanel(doc, text) {
@@ -998,6 +1035,13 @@
             collapsed = state.controllerSettings.collapsed === true || !!dockSide;
             applyDockState();
             renderStyle();
+            const roomCode = String(state.room || '').trim();
+            roomCodeButton.hidden = !roomCode;
+            roomCodeButton.textContent = roomCode
+                ? `房间码：${roomCode} · 点击复制`
+                : '';
+            roomCodeButton.title = roomCode ? '点击复制房间码' : '';
+            host.classList.toggle('has-room', !!roomCode);
             rotation?.setEnabled(
                 state.controllerSettings.rotationEnabled !== false,
             );
