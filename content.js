@@ -63,6 +63,8 @@
     let playbackBufferingReported = false;
     const bufferingPauseStates = new WeakMap();
     let floatingController = null;
+    const adFilter = window.SyncWatchAdFilter?.create(document, window);
+    const commentFilter = window.SyncWatchCommentFilter?.create(document, window);
 
     const tabTitlePrefix = '[一起看] ';
     const tabIconId = '__sync_watch_tab_icon';
@@ -944,6 +946,8 @@
     function handleRuntimeMessage(message) {
         if (message.type === 'STATE') {
             floatingController?.update(message.state);
+            adFilter?.setSettings(message.state?.controllerSettings);
+            commentFilter?.setSettings(message.state?.controllerSettings);
         } else if (message.type === 'CONTROLLER_ACTIVE') {
             floatingController?.setActive(message.active);
         } else if (message.type === 'REBIND_PLAYER') {
@@ -1041,23 +1045,16 @@
             (message) => floatingController?.showMessage(message),
         ),
     });
-    floatingController?.update({
-        controllerSettings: {
-            style: 'style-1',
-            rotationEnabled: true,
-            skipSeconds: 85,
-            position: null,
-            dockSide: 'right',
-        },
-        controllerActive: false,
-    });
-
     chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
     chrome.runtime
         .sendMessage({ type: 'GET_CONTROLLER_STATE' })
         .then((response) => {
-            if (response?.state) floatingController?.update(response.state);
+            if (response?.state) {
+                floatingController?.update(response.state);
+                adFilter?.setSettings(response.state.controllerSettings);
+                commentFilter?.setSettings(response.state.controllerSettings);
+            }
         })
         .catch(() => {});
 
@@ -1157,6 +1154,8 @@
         tabMarkerObserver?.disconnect();
         floatingController?.destroy();
         floatingController = null;
+        adFilter?.destroy();
+        commentFilter?.destroy();
         clearInterval(reportInterval);
         clearTimeout(autoPauseTimer);
         clearTimeout(bufferingTimer);

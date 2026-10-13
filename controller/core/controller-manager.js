@@ -15,6 +15,8 @@
         let video = null;
         let state = {};
         let active = false;
+        let stylesReady = false;
+        let settingsReady = false;
         let activePanel = '';
         let disk = null;
         let toastTimer = null;
@@ -53,14 +55,26 @@
             { signal: globalEvents.signal },
         );
 
+        function syncHostVisibility() {
+            if (!host) return;
+            const visible = active && stylesReady && settingsReady;
+            host.hidden = !visible;
+            // Inline hiding also works before the shadow stylesheets have loaded.
+            if (visible) host.style.removeProperty('display');
+            else host.style.setProperty('display', 'none', 'important');
+        }
+
         function ensureHost() {
             if (host) return;
 
             host = documentRef.createElement('div');
             host.id = '__sync_watch_controller';
             host.className = 'swc-host';
+            host.hidden = true;
+            host.style.setProperty('display', 'none', 'important');
             shadow = host.attachShadow({ mode: 'closed' });
 
+            const stylesheetLoads = [];
             for (const path of [
                 'controller/styles/shared.css',
                 'controller/styles/style-1/style.css',
@@ -69,6 +83,14 @@
                 const link = documentRef.createElement('link');
                 link.rel = 'stylesheet';
                 link.href = extensionUrl(path);
+                stylesheetLoads.push(new Promise((resolve) => {
+                    const listenerOptions = {
+                        once: true,
+                        signal: globalEvents.signal,
+                    };
+                    link.addEventListener('load', () => resolve(true), listenerOptions);
+                    link.addEventListener('error', () => resolve(false), listenerOptions);
+                }));
                 shadow.append(link);
             }
 
@@ -244,6 +266,11 @@
             moveIntoFullscreen();
             restorePosition();
             renderStyle();
+            Promise.all(stylesheetLoads).then((loaded) => {
+                if (globalEvents.signal.aborted) return;
+                stylesReady = loaded.every(Boolean);
+                syncHostVisibility();
+            });
         }
 
         function getPanelSignature() {
@@ -260,7 +287,7 @@
             const defaultX = Math.max(12, windowRef.innerWidth - size - 12);
             const defaultY = Math.max(
                 12,
-                windowRef.innerHeight / 2 - size / 2 + 200,
+                windowRef.innerHeight / 2 - size / 2,
             );
             dockSide = ['left', 'right'].includes(state.controllerSettings?.dockSide)
                 ? state.controllerSettings.dockSide
@@ -312,7 +339,7 @@
                     ? '›'
                     : dockSide === 'right'
                       ? '‹'
-                      : '↗';
+                      : '';
                 dockToggle.title = '展开圆盘';
                 dockToggle.setAttribute(
                     'aria-label',
@@ -962,6 +989,7 @@
         }
 
         function updateVideoState() {
+            updateCompactRotation();
             if (!ringCircle || !rotation) return;
             controller.progressRing.update(ringCircle, video);
             if (!video || video.ended) rotation.stop();
@@ -970,6 +998,15 @@
             } else {
                 rotation.start();
             }
+        }
+
+        function updateCompactRotation() {
+            // Room playback drives the compact record, even on an unbound page.
+            const playback = state.currentPlayback;
+            const playing = !!state.room && state.connected === true &&
+                !!playback && playback.paused === false &&
+                !playback.buffering && !playback.ended && !playback.awaitingSync;
+            host?.classList.toggle('compact-playing', playing && !documentRef.hidden);
         }
 
         function setVideo(nextVideo) {
@@ -1024,6 +1061,9 @@
         }
 
         function update(nextState) {
+            // Only background-provided settings may reveal the initialized UI.
+            const firstSettingsUpdate = !settingsReady && !!nextState?.controllerSettings;
+            if (nextState?.controllerSettings) settingsReady = true;
             const previousPositionSignature = JSON.stringify(
                 state.controllerSettings?.position ?? null,
             );
@@ -1067,6 +1107,7 @@
                 state.controllerSettings.rotationEnabled !== false,
             );
             if (
+                firstSettingsUpdate ||
                 size !== previousSize ||
                 dockSide !== previousDockSide ||
                 JSON.stringify(state.controllerSettings.position ?? null) !==
@@ -1082,10 +1123,11 @@
                     state.controllerActive === true &&
                     state.controllerSettings.enabled !== false;
             }
-            host.hidden = !active;
+            syncHostVisibility();
             if (activePanel && getPanelSignature() !== lastPanelSignature) {
                 renderPanel();
             }
+            updateCompactRotation();
         }
 
         function setActive(value) {
@@ -1094,7 +1136,7 @@
                 state.controllerSettings?.enabled !== false;
             state.controllerActive = active;
             if (active) ensureHost();
-            if (host) host.hidden = !active;
+            syncHostVisibility();
         }
 
         function destroy() {

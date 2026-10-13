@@ -78,31 +78,27 @@ function renderPlaybackProgress() {
     area.classList.remove('hidden');
     getElement('room-playback-title').textContent =
         currentPlayback.title || '当前视频';
-    getElement('room-playback-status').textContent = currentPlayback.buffering
-        ? '缓冲中'
-        : currentPlayback.paused
-          ? '已暂停'
-          : '播放中';
-
-    const elapsed = currentPlayback.paused || currentPlayback.buffering
-        ? currentPlayback.time
-        : currentPlayback.time +
-          Math.max(
-              0,
-              (Date.now() -
-                  (Number(currentPlayback.receivedAt) || currentPlayback.at)) /
-                  1000,
-          ) *
-              (currentPlayback.rate || 1);
-    const duration = Number(currentPlayback.duration) || 0;
+    const progress = SyncWatchPlaybackClock.getProgress(currentPlayback, {
+        connected: lastRenderedState?.connected === true,
+    });
+    getElement('room-playback-status').textContent = progress.awaitingSync
+        ? '等待同步'
+        : progress.ended
+          ? '已结束'
+          : currentPlayback.buffering
+            ? '缓冲中'
+            : currentPlayback.paused
+              ? '已暂停'
+              : '播放中';
+    const { time, duration } = progress;
 
     getElement('room-playback-current').textContent =
-        formatPlaybackTime(elapsed);
+        formatPlaybackTime(time);
     getElement('room-playback-duration').textContent = duration
         ? formatPlaybackTime(duration)
         : '时长未知';
     getElement('room-playback-progress').value = duration
-        ? Math.min(100, (elapsed / duration) * 100)
+        ? (time / duration) * 100
         : 0;
 }
 
@@ -723,6 +719,12 @@ function render(state) {
     getElement('display-name-label').textContent = savedDisplayName || '成员';
     updateLocalGreeting();
     const controllerSettings = state.controllerSettings || {};
+    getElement('block-ads').checked = controllerSettings.blockAds !== false;
+    getElement('block-promotions').checked = controllerSettings.blockPromotions !== false;
+    getElement('block-promotions').disabled = controllerSettings.blockAds === false;
+    getElement('block-meaningless-comments').checked =
+        controllerSettings.blockMeaninglessComments !== false;
+    getElement('block-meaningless-comments').disabled = controllerSettings.blockAds === false;
     getElement('controller-enabled').checked =
         controllerSettings.enabled !== false;
     getElement('controller-rotation').checked =
@@ -767,7 +769,6 @@ function render(state) {
         getElement('settings-summary').textContent = '连接设置（已配置）';
     } else {
         getElement('settings-summary').textContent = '连接设置（请先填写服务器地址）';
-        getElement('connection-settings').open = true;
     }
 
     if (state.room) {
@@ -950,7 +951,6 @@ getElement('server').addEventListener('change', () => {
     saveConfig();
     getElement('server').type = 'password';
     getElement('toggle-server').textContent = '显示';
-    getElement('connection-settings').open = false;
     getElement('settings-summary').textContent = '连接设置（已配置）';
 });
 
@@ -980,6 +980,32 @@ function updateControllerSettings(changes) {
 getElement('controller-enabled').addEventListener('change', () => {
     updateControllerSettings({
         enabled: getElement('controller-enabled').checked,
+    });
+});
+
+getElement('block-ads').addEventListener('change', () => {
+    const blockAds = getElement('block-ads').checked;
+    getElement('block-promotions').disabled = !blockAds;
+    getElement('block-meaningless-comments').disabled = !blockAds;
+    if (blockAds) {
+        getElement('block-promotions').checked = true;
+        getElement('block-meaningless-comments').checked = true;
+    }
+    updateControllerSettings({
+        blockAds,
+        ...(blockAds ? { blockPromotions: true, blockMeaninglessComments: true } : {}),
+    });
+});
+
+getElement('block-promotions').addEventListener('change', () => {
+    updateControllerSettings({
+        blockPromotions: getElement('block-promotions').checked,
+    });
+});
+
+getElement('block-meaningless-comments').addEventListener('change', () => {
+    updateControllerSettings({
+        blockMeaninglessComments: getElement('block-meaningless-comments').checked,
     });
 });
 

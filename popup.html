@@ -108,9 +108,8 @@
         </dialog>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
-            <!-- Server settings stay collapsed after a server address is saved. -->
-            <details id="connection-settings">
-                <summary id="settings-summary">连接设置</summary>
+            <section id="connection-settings" class="menu-section">
+                <h2 id="settings-summary" class="menu-section-title">连接设置</h2>
                 <label for="server">信令服务器地址</label>
                 <div class="server-row">
                     <input
@@ -127,10 +126,10 @@
                 <p class="small" id="server-help">
                     地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
                 </p>
-            </details>
+            </section>
 
-            <section class="theme-setting" aria-labelledby="theme-setting-title">
-                <h2 id="theme-setting-title">主题</h2>
+            <section class="theme-setting menu-section" aria-labelledby="theme-setting-title">
+                <h2 id="theme-setting-title" class="menu-section-title">主题</h2>
                 <div class="theme-options" role="group" aria-label="选择界面主题">
                     <button class="theme-option" type="button" data-theme="system" aria-pressed="false">
                         <span class="theme-icon theme-icon-system" aria-hidden="true">◐</span>
@@ -147,11 +146,23 @@
                 </div>
             </section>
 
-            <details id="playback-settings" class="feature-menu">
-                <summary>播放与标签页设置</summary>
+            <section id="playback-settings" class="menu-section feature-menu">
+                <h2 class="menu-section-title">播放设置</h2>
                 <div class="feature-menu-content">
                     <section class="controller-settings-panel">
                         <strong>页面圆盘控制器</strong>
+                        <label class="setting-checkbox" for="block-ads">
+                            <input id="block-ads" type="checkbox" />
+                            屏蔽网页广告和可跳过的播放器广告
+                        </label>
+                        <label class="setting-checkbox setting-sub-option" for="block-promotions">
+                            <input id="block-promotions" type="checkbox" />
+                            屏蔽推广
+                        </label>
+                        <label class="setting-checkbox setting-sub-option" for="block-meaningless-comments">
+                            <input id="block-meaningless-comments" type="checkbox" />
+                            屏蔽无意义评论
+                        </label>
                         <label class="setting-checkbox" for="controller-enabled">
                             <input id="controller-enabled" type="checkbox" />
                             在网页显示圆球组件
@@ -238,10 +249,10 @@
                     </section>
                     -->
                 </div>
-            </details>
+            </section>
 
-            <details id="tab-settings" class="feature-menu hidden">
-                <summary>标签页设置</summary>
+            <section id="tab-settings" class="menu-section feature-menu hidden">
+                <h2 class="menu-section-title">标签页设置</h2>
                 <div class="feature-menu-content">
                     <div class="tab-marker-control">
                         <label class="setting-checkbox" for="modify-tab-icon">
@@ -265,7 +276,7 @@
                         </div>
                     </section>
                 </div>
-            </details>
+            </section>
 
         </div>
 
@@ -462,6 +473,7 @@
             版本 <span id="extension-version"></span>
         </footer>
 
+        <script src="playback-clock.js"></script>
         <script src="popup.js"></script>
     </body>
 </html>

@@ -363,9 +363,17 @@ button:focus:not(:focus-visible),
 :host(.is-collapsed:not(.is-docked)) .swc-dock-shape {
     width: 51px;
     height: 51px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, #fff7fa 0 3%, #fbdce7 4% 20%, transparent 21%),
+        conic-gradient(from 25deg, transparent, rgb(255 255 255 / 14%) 40deg, transparent 80deg 200deg, rgb(255 255 255 / 10%) 240deg, transparent 280deg),
+        repeating-radial-gradient(circle, #f18bad 0 2px, #db6f94 3px 4px);
+    border: 1px solid #d66b90;
+    box-sizing: border-box;
 }
 
 :host(.is-collapsed:not(.is-docked)) .swc-dock-icon {
+    display: none;
     top: 50%;
     left: 50%;
     right: auto;
@@ -373,8 +381,9 @@ button:focus:not(:focus-visible),
 }
 
 :host(.is-collapsed:not(.is-docked)) .swc-dock-shape path {
-    fill: rgb(251 114 153 / 58%);
-    stroke: rgb(255 255 255 / 70%);
+    display: none;
+    fill: transparent;
+    stroke: transparent;
 }
 
 :host(.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {
@@ -398,8 +407,8 @@ button:focus:not(:focus-visible),
 }
 
 :host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-shape path {
-    fill: rgb(251 114 153 / 42%);
-    stroke: rgb(255 255 255 / 58%);
+    fill: transparent;
+    stroke: transparent;
 }
 
 :host(.is-fullscreen.is-collapsed:not(.is-docked)) .swc-dock-toggle:hover {

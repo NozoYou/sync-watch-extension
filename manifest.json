@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.11.3",
+    "version": "0.12.0",
     "description": "和朋友的视频同步播放插件。",
     "permissions": [
         "activeTab",
@@ -45,6 +45,8 @@
                 "controller/core/progress-ring.js",
                 "controller/animations/rotation.js",
                 "controller/player/skip-segments.js",
+                "controller/player/ad-filter.js",
+                "controller/player/comment-filter.js",
                 "controller/panels/create-room.js",
                 "controller/panels/join-room.js",
                 "controller/panels/shared-history.js",

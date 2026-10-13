@@ -100,8 +100,17 @@ header {
     margin-bottom: 8px;
 }
 
-.main-menu-panel > details {
-    margin: 5px 0;
+.menu-section {
+    margin: 0;
+    padding: 10px 2px;
+    border-bottom: 1px solid #e8e6e8;
+}
+
+.menu-section-title {
+    margin: 0 0 8px;
+    color: #e66b91;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .theme-setting {
@@ -109,8 +118,8 @@ header {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin: 5px 0;
-    padding: 5px 10px;
+    margin: 0;
+    padding: 10px 2px;
     border-radius: 8px;
 }
 
@@ -675,26 +684,14 @@ button:hover {
     background: rgb(255 255 255 / 3%);
 }
 
-.feature-menu {
-    border: 1px solid #e5e2e5;
-    background: #fff;
-}
-
-.feature-menu[open] {
-    background: #fff;
-}
-
-.feature-menu > summary {
-    display: flex;
-    align-items: center;
-    min-height: 20px;
-    color: #e66b91;
-    font-weight: 600;
-    list-style-position: outside;
+.main-menu-panel .feature-menu {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
 }
 
 .feature-menu-content {
-    padding-top: 5px;
+    padding-top: 0;
 }
 
 .controller-settings-panel {
@@ -710,6 +707,14 @@ button:hover {
 .controller-settings-panel > strong {
     color: #e66b91;
     font-size: 11px;
+}
+
+.setting-sub-option {
+    margin-left: 20px;
+}
+
+.setting-sub-option:has(input:disabled) {
+    opacity: 0.5;
 }
 
 .controller-settings-panel > label:not(.setting-checkbox) {
@@ -1213,10 +1218,6 @@ body.dark-mode details {
     color: #e6e6e6;
 }
 
-body.dark-mode .theme-setting {
-    background: #333539;
-}
-
 body.dark-mode .theme-setting h2 {
     color: #e6e6e6;
 }
@@ -1252,6 +1253,14 @@ body.dark-mode .share-history-item,
 body.dark-mode .recommendation-item {
     background: #333539;
     color: #e6e6e6;
+}
+
+body.dark-mode .menu-section {
+    border-color: #484a4f;
+}
+
+body.dark-mode .menu-section-title {
+    color: #f08aa8;
 }
 
 body.dark-mode input,

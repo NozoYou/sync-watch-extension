@@ -1,5 +1,7 @@
 // The service worker owns room state and keeps the signaling socket alive
 // while users move between video tabs.
+importScripts('playback-clock.js');
+
 let socket = null;
 let pingTimer = null;
 let reconnectTimer = null;
@@ -9,6 +11,8 @@ const controllerContentScriptFiles = [
     'controller/core/progress-ring.js',
     'controller/animations/rotation.js',
     'controller/player/skip-segments.js',
+    'controller/player/ad-filter.js',
+    'controller/player/comment-filter.js',
     'controller/panels/create-room.js',
     'controller/panels/join-room.js',
     'controller/panels/shared-history.js',
@@ -70,6 +74,9 @@ const state = {
     controllerSettings: {
         style: 'style-1',
         enabled: true,
+        blockAds: true,
+        blockPromotions: true,
+        blockMeaninglessComments: true,
         themeMode: 'system',
         rotationEnabled: true,
         skipSeconds: 85,
@@ -144,6 +151,9 @@ const ready = chrome.storage.local
     ])
     .then((saved) => {
         Object.assign(state, saved);
+        // A persisted playing flag does not prove that a player survived restart.
+        // Wait for a fresh host sample without counting time spent offline.
+        freezeRoomPlaybackClock(false);
 
         if (state.room) {
             state.connected = false;
@@ -156,6 +166,10 @@ function persist() {
     state.controllerSettings = {
         style: 'style-1',
         enabled: state.controllerSettings?.enabled !== false,
+        blockAds: state.controllerSettings?.blockAds !== false,
+        blockPromotions: state.controllerSettings?.blockPromotions !== false,
+        blockMeaninglessComments:
+            state.controllerSettings?.blockMeaninglessComments !== false,
         themeMode: ['system', 'light', 'dark'].includes(
             state.controllerSettings?.themeMode,
         )
@@ -272,6 +286,21 @@ function openSavedProgressWhenReady(tabId, frameId = 0) {
     pendingSavedProgress.delete(tabId);
 }
 
+function freezeRoomPlaybackClock(advanceToNow = true) {
+    if (!state.currentPlayback) return;
+    const now = Date.now();
+    const progress = SyncWatchPlaybackClock.getProgress(state.currentPlayback, {
+        now,
+        connected: advanceToNow && state.connected,
+    });
+    state.currentPlayback = {
+        ...state.currentPlayback,
+        time: progress.time,
+        receivedAt: now,
+        awaitingSync: true,
+    };
+}
+
 function saveCurrentProgress() {
     const playback = state.currentPlayback;
     const url = safePageUrl(
@@ -283,20 +312,16 @@ function saveCurrentProgress() {
         return;
     }
 
-    const receivedAt =
-        Number(playback.receivedAt) || Number(playback.at) || Date.now();
-    const time = playback.paused || playback.buffering
-        ? Number(playback.time) || 0
-        : (Number(playback.time) || 0) +
-          Math.max(0, (Date.now() - receivedAt) / 1000) *
-              (Number(playback.rate) || 1);
+    const progress = SyncWatchPlaybackClock.getProgress(playback, {
+        connected: state.connected,
+    });
     const item = {
         id: crypto.randomUUID(),
         title:
             playback.title || state.sharedNavigation?.title || '当前视频',
         url,
-        time: Math.max(0, time),
-        duration: Number(playback.duration) || 0,
+        time: progress.time,
+        duration: progress.duration,
         savedAt: Date.now(),
     };
 
@@ -871,11 +896,10 @@ function updatePlaybackForBufferingControl(control) {
     if (!playback) return;
 
     const now = Date.now();
-    const receivedAt =
-        Number(playback.receivedAt) || Number(playback.at) || now;
-    const elapsed = playback.paused || playback.buffering
-        ? 0
-        : Math.max(0, (now - receivedAt) / 1000) * (playback.rate || 1);
+    const progress = SyncWatchPlaybackClock.getProgress(playback, {
+        now,
+        connected: state.connected,
+    });
     const paused =
         control.action !== 'resume' || control.resumePlayback !== true;
 
@@ -883,7 +907,7 @@ function updatePlaybackForBufferingControl(control) {
     state.currentPlayback = {
         ...playback,
         action: paused ? 'pause' : 'play',
-        time: (Number(playback.time) || 0) + elapsed,
+        time: progress.time,
         paused,
         buffering: false,
         at: now,
@@ -1361,6 +1385,9 @@ async function connectRoom() {
             );
             startAutoPauseWhenReady();
             if (!state.bufferingMembers.length) finishBufferingPause();
+            if (message.clientId === state.hostClientId) {
+                freezeRoomPlaybackClock();
+            }
             publish();
             return;
         }
@@ -1371,6 +1398,7 @@ async function connectRoom() {
     };
 
     socket.onclose = () => {
+        freezeRoomPlaybackClock();
         state.connected = false;
 
         if (state.room) {
@@ -3035,6 +3063,18 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     typeof requested.enabled === 'boolean'
                         ? requested.enabled
                         : state.controllerSettings.enabled !== false,
+                blockAds:
+                    typeof requested.blockAds === 'boolean'
+                        ? requested.blockAds
+                        : state.controllerSettings.blockAds !== false,
+                blockPromotions:
+                    typeof requested.blockPromotions === 'boolean'
+                        ? requested.blockPromotions
+                        : state.controllerSettings.blockPromotions !== false,
+                blockMeaninglessComments:
+                    typeof requested.blockMeaninglessComments === 'boolean'
+                        ? requested.blockMeaninglessComments
+                        : state.controllerSettings.blockMeaninglessComments !== false,
                 themeMode: ['system', 'light', 'dark'].includes(
                     requested.themeMode,
                 )
@@ -3335,6 +3375,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     }
 
     if (state.tabId === tabId) {
+        if (state.role === 'host') freezeRoomPlaybackClock();
         state.tabId = null;
         state.videoReady = false;
         state.videoFrameId = 0;
