@@ -165,6 +165,12 @@ const ready = chrome.storage.local
     });
 
 function persist() {
+    const requestedPosition = state.controllerSettings?.position;
+    const hasPosition = Number.isFinite(requestedPosition?.x) &&
+        Number.isFinite(requestedPosition?.y);
+    const legacyOrigin = requestedPosition?.x === 0 && requestedPosition?.y === 0 &&
+        state.controllerSettings?.positionVersion !== 1;
+    const savedPosition = hasPosition && !legacyOrigin ? requestedPosition : null;
     state.controllerSettings = {
         style: 'style-1',
         enabled: state.controllerSettings?.enabled !== false,
@@ -192,20 +198,20 @@ function persist() {
         size: Number.isFinite(Number(state.controllerSettings?.size))
             ? Math.max(120, Math.min(240, Math.round(Number(state.controllerSettings.size))))
             : 168,
-        dockSide: ['left', 'right'].includes(state.controllerSettings?.dockSide)
-            ? state.controllerSettings.dockSide
-            : Number.isFinite(state.controllerSettings?.position?.x) &&
-              Number.isFinite(state.controllerSettings?.position?.y)
-              ? null
-              : 'right',
+        dockSide: !savedPosition
+            ? 'right'
+            : ['left', 'right'].includes(state.controllerSettings?.dockSide)
+              ? state.controllerSettings.dockSide
+              : null,
         collapsed:
+            !savedPosition ||
             state.controllerSettings?.collapsed === true ||
             ['left', 'right'].includes(state.controllerSettings?.dockSide),
-        position: Number.isFinite(state.controllerSettings?.position?.x) &&
-            Number.isFinite(state.controllerSettings?.position?.y)
+        positionVersion: state.controllerSettings?.positionVersion === 1 ? 1 : 0,
+        position: savedPosition
             ? {
-                  x: state.controllerSettings.position.x,
-                  y: state.controllerSettings.position.y,
+                  x: savedPosition.x,
+                  y: savedPosition.y,
               }
             : null,
     };
@@ -3118,7 +3124,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                               x: Math.max(0, Math.round(position.x)),
                               y: Math.max(0, Math.round(position.y)),
                           }
-                        : null,
+                        : position === null
+                          ? null
+                          : state.controllerSettings.position,
+                positionVersion: requested.positionVersion === 1
+                    ? 1
+                    : state.controllerSettings.positionVersion || 0,
             };
             publish();
             for (const tabId of activeControllerFrames.keys()) {

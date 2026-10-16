@@ -13,12 +13,17 @@
 
         const recognition = window.SyncWatchOpedClient;
         if (recognition?.enabled) {
+            // A click may happen before the route observer notices an episode change.
+            if (recognition.pageUrl !== location.href || recognition.pending) {
+                return { success: false, message: '正在获取当前集的片头片尾识别结果，请稍候。' };
+            }
             const segment = recognition.segments.find(item =>
                 video.currentTime >= item.start && video.currentTime < item.end);
             if (!segment) {
                 return { success: false, message: '当前位置没有匹配的片头或片尾。' };
             }
-            const targetTime = Math.min(video.duration, segment.end);
+            // Leave a short lead-in before the detected segment ends.
+            const targetTime = Math.min(video.duration, Math.max(0, segment.end - 3));
             video.currentTime = targetTime;
             return {
                 success: true,

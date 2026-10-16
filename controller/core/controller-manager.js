@@ -283,24 +283,46 @@
         }
 
         function restorePosition() {
-            const saved = state.controllerSettings?.position;
-            const defaultX = Math.max(12, windowRef.innerWidth - size - 12);
+            applySize();
+            const saved = getSavedPosition();
+            const defaultX = Math.max(0, windowRef.innerWidth - size);
             const defaultY = Math.max(
                 12,
                 windowRef.innerHeight / 2 - size / 2,
             );
-            dockSide = ['left', 'right'].includes(state.controllerSettings?.dockSide)
-                ? state.controllerSettings.dockSide
-                : Number.isFinite(saved?.x) && Number.isFinite(saved?.y)
-                  ? ''
-                  : 'right';
+            dockSide = !saved
+                ? 'right'
+                : ['left', 'right'].includes(state.controllerSettings?.dockSide)
+                  ? state.controllerSettings.dockSide
+                  : '';
             collapsed = state.controllerSettings?.collapsed === true || !!dockSide;
             autoDockOriginSide = !collapsed ? 'free' : '';
             host.style.left = `${Number.isFinite(saved?.x) ? saved.x : defaultX}px`;
             host.style.top = `${Number.isFinite(saved?.y) ? saved.y : defaultY}px`;
-            applySize();
             applyDockState();
             clampHostToViewport();
+        }
+
+        function getSavedPosition() {
+            const saved = state.controllerSettings?.position;
+            if (!Number.isFinite(saved?.x) || !Number.isFinite(saved?.y)) return null;
+            // Older hidden-layout reads could persist a false origin position.
+            // Versioned positions may legitimately be dragged to that origin.
+            if (saved.x === 0 && saved.y === 0 && state.controllerSettings?.positionVersion !== 1) {
+                return null;
+            }
+            return saved;
+        }
+
+        function getHostPosition() {
+            // display:none makes offsetLeft/offsetTop zero. Inline coordinates
+            // remain valid while styles/settings load or the controller is hidden.
+            const x = Number.parseFloat(host?.style.left);
+            const y = Number.parseFloat(host?.style.top);
+            return {
+                x: Number.isFinite(x) ? x : Math.max(0, windowRef.innerWidth - size),
+                y: Number.isFinite(y) ? y : Math.max(12, (windowRef.innerHeight - size) / 2),
+            };
         }
 
         function applySize() {
@@ -373,12 +395,13 @@
                 windowRef.innerWidth - visualSize - margin - offset,
             );
             const isDraggingDock = dragStart?.moved === true;
+            const position = getHostPosition();
             const x = dockSide === 'left' && !isDraggingDock
                 ? 0
                 : dockSide === 'right' && !isDraggingDock
                   ? Math.max(0, windowRef.innerWidth - size)
-                  : Math.max(margin - offset, Math.min(maxX, host.offsetLeft));
-            const y = Math.max(margin - offset, Math.min(maxY, host.offsetTop));
+                  : Math.max(margin - offset, Math.min(maxX, position.x));
+            const y = Math.max(margin - offset, Math.min(maxY, position.y));
             host.style.left = `${x}px`;
             host.style.top = `${y}px`;
             if (activePanel) positionPanel();
@@ -538,7 +561,7 @@
             const offset = isDockHandle
                 ? previousDockSide === 'right' ? size - visualWidth : 0
                 : (size - visualWidth) / 2;
-            const visualLeft = host.offsetLeft + offset;
+            const visualLeft = getHostPosition().x + offset;
             const visualRight = visualLeft + visualWidth;
             const nearBottomControls = Boolean(documentRef.fullscreenElement) &&
                 event.clientY >= windowRef.innerHeight - 140;
@@ -591,7 +614,8 @@
         function persistPosition() {
             const settings = {
                 ...(state.controllerSettings || {}),
-                position: { x: host.offsetLeft, y: host.offsetTop },
+                position: getHostPosition(),
+                positionVersion: 1,
                 size,
                 dockSide: dockSide || null,
                 collapsed,
@@ -825,7 +849,7 @@
             if (activePanel) return;
             if (!dockReturnSide) {
                 if (documentRef.fullscreenElement && !dockSide) {
-                    const centerX = host.offsetLeft + size / 2;
+                    const centerX = getHostPosition().x + size / 2;
                     dockSide = centerX < windowRef.innerWidth / 2
                         ? 'left'
                         : 'right';
@@ -1084,9 +1108,11 @@
             const previousSize = size;
             const previousDockSide = dockSide;
             applySize();
-            dockSide = ['left', 'right'].includes(state.controllerSettings.dockSide)
-                ? state.controllerSettings.dockSide
-                : '';
+            dockSide = !getSavedPosition()
+                ? 'right'
+                : ['left', 'right'].includes(state.controllerSettings.dockSide)
+                  ? state.controllerSettings.dockSide
+                  : '';
             collapsed = state.controllerSettings.collapsed === true || !!dockSide;
             applyDockState();
             renderStyle();
