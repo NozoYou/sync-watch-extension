@@ -201,6 +201,7 @@ webSocketServer.on('connection', (webSocket) => {
                 room.navigationHistory = [];
                 room.autoPause = { enabled: false, duration: 5 };
                 room.pauseAfterAutoSwitch = false;
+                room.autoSkipOped = false;
                 room.pauseOnBuffer = false;
                 room.pauseOnBufferDelay = 5;
                 room.autoCorrectionEnabled = true;
@@ -278,6 +279,7 @@ webSocketServer.on('connection', (webSocket) => {
                     navigationHistory: room.navigationHistory,
                     autoPause: room.autoPause,
                     pauseAfterAutoSwitch: room.pauseAfterAutoSwitch,
+                    autoSkipOped: room.autoSkipOped,
                     pauseOnBuffer: room.pauseOnBuffer,
                     pauseOnBufferDelay: room.pauseOnBufferDelay,
                     autoCorrectionEnabled: room.autoCorrectionEnabled,
@@ -449,6 +451,10 @@ webSocketServer.on('connection', (webSocket) => {
                         message.payload.pauseAfterAutoSwitch;
                 }
 
+                if (typeof message.payload.autoSkipOped === 'boolean') {
+                    room.autoSkipOped = message.payload.autoSkipOped;
+                }
+
                 if (typeof message.payload.pauseOnBuffer === 'boolean') {
                     room.pauseOnBuffer = message.payload.pauseOnBuffer;
                 }
@@ -465,6 +471,7 @@ webSocketServer.on('connection', (webSocket) => {
                 message.payload = {
                     autoPause: room.autoPause,
                     pauseAfterAutoSwitch: room.pauseAfterAutoSwitch,
+                    autoSkipOped: room.autoSkipOped,
                     pauseOnBuffer: room.pauseOnBuffer,
                     pauseOnBufferDelay: room.pauseOnBufferDelay,
                     autoCorrectionEnabled: room.autoCorrectionEnabled,

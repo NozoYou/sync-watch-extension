@@ -3,6 +3,12 @@
     "name": "一起看 · Sync Watch",
     "version": "0.13.1",
     "description": "和朋友的视频同步播放插件。",
+    "icons": {
+        "16": "icons/together_watch_light.png",
+        "32": "icons/together_watch_light.png",
+        "48": "icons/together_watch_light.png",
+        "128": "icons/together_watch_light.png"
+    },
     "permissions": [
         "activeTab",
         "storage",
@@ -15,6 +21,12 @@
     "host_permissions": ["<all_urls>", "https://*/*", "http://*/*"],
     "action": {
         "default_title": "一起看",
+        "default_icon": {
+            "16": "icons/together_watch_light.png",
+            "32": "icons/together_watch_light.png",
+            "48": "icons/together_watch_light.png",
+            "128": "icons/together_watch_light.png"
+        },
         "default_popup": "popup.html"
     },
     "commands": {
@@ -48,6 +60,8 @@
                 "controller/animations/rotation.js",
                 "controller/player/skip-segments.js",
                 "oped-automation/extension/client.js",
+                "oped-automation/extension/progress-markers.js",
+                "oped-automation/extension/auto-skip.js",
                 "controller/player/ad-filter.js",
                 "controller/player/comment-filter.js",
                 "controller/panels/create-room.js",

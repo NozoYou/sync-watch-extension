@@ -9,6 +9,15 @@
     let timer;
     let settingEnabled = false;
     let pageVersion = 0;
+    const subscribers = new Set();
+    client.subscribe = (listener) => {
+        subscribers.add(listener);
+        return () => subscribers.delete(listener);
+    };
+
+    function notify() {
+        for (const listener of subscribers) listener();
+    }
 
     function refreshAvailability() {
         client.enabled = settingEnabled && location.hostname === 'www.bilibili.com' &&
@@ -25,6 +34,7 @@
             client.pending = true;
             pending = true;
             refreshAvailability();
+            notify();
             force = true;
         }
         if (busy) {
@@ -45,6 +55,7 @@
                 pending = true;
                 client.segments = [];
                 client.pending = true;
+                notify();
                 return;
             }
             client.enabled = settingEnabled && reply?.enabled === true && !reply?.unsupported;
@@ -52,6 +63,7 @@
             client.pageUrl = page;
             pending = reply?.pending === true;
             client.pending = pending;
+            notify();
         } catch {
             clearInterval(timer);
         } finally {
@@ -67,6 +79,7 @@
         if (area === 'local' && changes.opedSettings) {
             settingEnabled = changes.opedSettings.newValue?.enabled === true;
             refreshAvailability();
+            notify();
         }
         if (area === 'local' && (changes.opedSettings || changes.opedResults)) void update(true);
     });

@@ -790,6 +790,9 @@ function render(state) {
         const isHost = state.role === 'host';
         getElement('member-follow-settings').classList.toggle('hidden', !isGuest);
         getElement('host-sharing-settings').classList.toggle('hidden', !isHost);
+        getElement('host-oped-settings').classList.toggle('hidden', !isHost);
+        getElement('auto-skip-oped').checked = state.autoSkipOped === true;
+        getElement('auto-skip-oped').disabled = !state.connected;
         getElement('auto-share').checked = !!state.autoShare;
         getElement('auto-share').disabled = !state.connected;
         getElement('pause-after-auto-switch').checked =
@@ -865,6 +868,9 @@ function render(state) {
         getElement('host-sharing-settings').classList.add('hidden');
         getElement('auto-share').checked = false;
         getElement('auto-share').disabled = true;
+        getElement('host-oped-settings').classList.add('hidden');
+        getElement('auto-skip-oped').checked = false;
+        getElement('auto-skip-oped').disabled = true;
         getElement('share-current-page').disabled = true;
         getElement('modify-tab-icon').checked = !!state.modifyTabIcon;
         getElement('modify-tab-icon').disabled = true;
@@ -903,6 +909,7 @@ chrome.storage.local.get(
         'recommendationStatus',
         'autoPause',
         'pauseAfterAutoSwitch',
+        'autoSkipOped',
         'controllerSettings',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
@@ -1076,6 +1083,13 @@ getElement('auto-share').addEventListener('change', async () => {
         type: 'SET_AUTO_SHARE',
         enabled: getElement('auto-share').checked,
         tabId: activeTab?.id,
+    });
+});
+
+getElement('auto-skip-oped').addEventListener('change', () => {
+    chrome.runtime.sendMessage({
+        type: 'SET_AUTO_SKIP_OPED',
+        enabled: getElement('auto-skip-oped').checked,
     });
 });
 

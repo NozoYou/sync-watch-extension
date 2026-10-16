@@ -63,6 +63,8 @@
     let playbackBufferingReported = false;
     const bufferingPauseStates = new WeakMap();
     let floatingController = null;
+    let automaticOpedSkip = null;
+    const opedProgressMarkers = window.SyncWatchOpedProgress?.create(document, window);
     const adFilter = window.SyncWatchAdFilter?.create(document, window);
     const commentFilter = window.SyncWatchCommentFilter?.create(document, window);
 
@@ -301,6 +303,8 @@
         if (!currentVideo) return false;
         if (currentVideo === video && !force) {
             floatingController?.setVideo(currentVideo);
+            automaticOpedSkip?.setVideo(currentVideo);
+            opedProgressMarkers?.setVideo(currentVideo);
             return true;
         }
 
@@ -380,6 +384,8 @@
         }
 
         floatingController?.setVideo(currentVideo);
+        automaticOpedSkip?.setVideo(currentVideo);
+        opedProgressMarkers?.setVideo(currentVideo);
         return true;
     }
 
@@ -946,8 +952,11 @@
     function handleRuntimeMessage(message) {
         if (message.type === 'STATE') {
             floatingController?.update(message.state);
+            automaticOpedSkip?.update(message.state);
             adFilter?.setSettings(message.state?.controllerSettings);
             commentFilter?.setSettings(message.state?.controllerSettings);
+        } else if (message.type === 'AUTO_SKIP_OPED_STATE') {
+            automaticOpedSkip?.update(message.state);
         } else if (message.type === 'CONTROLLER_ACTIVE') {
             floatingController?.setActive(message.active);
         } else if (message.type === 'REBIND_PLAYER') {
@@ -1000,6 +1009,7 @@
             const currentVideo = chooseVideo();
             if (currentVideo) sendVideo(currentVideo, 'snapshot', true);
         } else if (message.type === 'ROOM_CONNECTED') {
+            automaticOpedSkip?.update(message.automaticOpedState || {});
             role = message.role || '';
             autoCorrectionEnabled = message.autoCorrectionEnabled !== false;
             bufferingDelaySeconds = [3, 5].includes(message.bufferingDelay)
@@ -1036,14 +1046,16 @@
         }
     }
 
+    const controllerActions = window.SyncWatchController.createActions(
+        (message) => chrome.runtime.sendMessage(message),
+        chooseVideo,
+        (message) => floatingController?.showMessage(message),
+    );
+    automaticOpedSkip = window.SyncWatchController.autoSkip?.create(controllerActions);
     floatingController = window.SyncWatchController?.manager?.create({
         document,
         window,
-        actions: window.SyncWatchController.createActions(
-            (message) => chrome.runtime.sendMessage(message),
-            chooseVideo,
-            (message) => floatingController?.showMessage(message),
-        ),
+        actions: controllerActions,
     });
     chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
@@ -1052,6 +1064,7 @@
         .then((response) => {
             if (response?.state) {
                 floatingController?.update(response.state);
+                automaticOpedSkip?.update(response.state, response.identity);
                 adFilter?.setSettings(response.state.controllerSettings);
                 commentFilter?.setSettings(response.state.controllerSettings);
             }
@@ -1061,6 +1074,8 @@
     if (isTop) chrome.runtime.sendMessage({ type: 'GET_ROLE' });
 
     function reportVideoFrame() {
+        // Reuse the existing DOM/player reports to discover rebuilt timeline nodes.
+        opedProgressMarkers?.refresh();
         const currentVideo = chooseVideo();
         if (currentVideo !== video) bind(currentVideo);
         reportInjectionStatus();
@@ -1154,6 +1169,9 @@
         tabMarkerObserver?.disconnect();
         floatingController?.destroy();
         floatingController = null;
+        automaticOpedSkip?.destroy();
+        automaticOpedSkip = null;
+        opedProgressMarkers?.destroy();
         adFilter?.destroy();
         commentFilter?.destroy();
         clearInterval(reportInterval);

@@ -6,6 +6,7 @@ importScripts('oped-automation/extension/background.js');
 let socket = null;
 let pingTimer = null;
 let reconnectTimer = null;
+let automaticOpedTarget = null;
 let nextPingId = 0;
 const pendingLatencyPings = new Map();
 const controllerContentScriptFiles = [
@@ -13,6 +14,8 @@ const controllerContentScriptFiles = [
     'controller/animations/rotation.js',
     'controller/player/skip-segments.js',
     'oped-automation/extension/client.js',
+    'oped-automation/extension/progress-markers.js',
+    'oped-automation/extension/auto-skip.js',
     'controller/player/ad-filter.js',
     'controller/player/comment-filter.js',
     'controller/panels/create-room.js',
@@ -73,6 +76,7 @@ const state = {
     autoPauseReady: [],
     autoPauseStartedNavigationId: '',
     pauseAfterAutoSwitch: false,
+    autoSkipOped: false,
     controllerSettings: {
         style: 'style-1',
         enabled: true,
@@ -136,6 +140,7 @@ const ready = chrome.storage.local
         'autoPauseReady',
         'autoPauseStartedNavigationId',
         'pauseAfterAutoSwitch',
+        'autoSkipOped',
         'controllerSettings',
         'pauseOnBuffer',
         'pauseOnBufferDelay',
@@ -251,6 +256,7 @@ function persist() {
         autoPauseReady: state.autoPauseReady,
         autoPauseStartedNavigationId: state.autoPauseStartedNavigationId,
         pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+        autoSkipOped: state.autoSkipOped,
         controllerSettings: state.controllerSettings,
         pauseOnBuffer: state.pauseOnBuffer,
         pauseOnBufferDelay: state.pauseOnBufferDelay,
@@ -272,6 +278,33 @@ function persist() {
 function publish() {
     persist();
     chrome.runtime.sendMessage({ type: 'STATE', state }).catch(() => {});
+    syncAutomaticOpedState();
+}
+
+function getAutomaticOpedState() {
+    return {
+        room: state.room,
+        role: state.role,
+        connected: state.connected,
+        autoSkipOped: state.autoSkipOped,
+        tabId: state.tabId,
+        videoFrameId: state.videoFrameId,
+        videoReady: state.videoReady,
+    };
+}
+
+function syncAutomaticOpedState() {
+    const next = { tabId: state.tabId, frameId: state.videoFrameId ?? 0 };
+    // Stop the previous player before rebinding another tab or iframe.
+    if (automaticOpedTarget &&
+        (automaticOpedTarget.tabId !== next.tabId || automaticOpedTarget.frameId !== next.frameId)) {
+        sendTab({ type: 'AUTO_SKIP_OPED_STATE', state: { connected: false, autoSkipOped: false } },
+            automaticOpedTarget.frameId, automaticOpedTarget.tabId);
+    }
+    automaticOpedTarget = Number.isInteger(next.tabId) ? next : null;
+    if (automaticOpedTarget) {
+        sendTab({ type: 'AUTO_SKIP_OPED_STATE', state: getAutomaticOpedState() }, next.frameId, next.tabId);
+    }
 }
 
 function openSavedProgressWhenReady(tabId, frameId = 0) {
@@ -402,6 +435,7 @@ function sendRoomTabState(frameId = state.videoFrameId) {
             bufferingDelay: state.pauseOnBufferDelay,
             bufferingEnabled: isBufferPauseEnabledForMember(state.clientId),
             autoCorrectionEnabled: state.autoCorrectionEnabled,
+            automaticOpedState: getAutomaticOpedState(),
         },
         frameId,
     );
@@ -1233,6 +1267,7 @@ async function connectRoom() {
             state.autoPause = message.autoPause || { enabled: false, duration: 5 };
             state.pauseAfterAutoSwitch =
                 message.pauseAfterAutoSwitch === true;
+            state.autoSkipOped = message.autoSkipOped === true;
             state.pauseOnBuffer = message.pauseOnBuffer === true;
             state.pauseOnBufferDelay = [3, 5].includes(
                 message.pauseOnBufferDelay,
@@ -1511,6 +1546,7 @@ function handleRoomEvent(message) {
         };
         state.pauseAfterAutoSwitch =
             message.payload?.pauseAfterAutoSwitch === true;
+        state.autoSkipOped = message.payload?.autoSkipOped === true;
         state.pauseOnBuffer = message.payload?.pauseOnBuffer === true;
         state.pauseOnBufferDelay = [3, 5].includes(
             message.payload?.pauseOnBufferDelay,
@@ -2114,7 +2150,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     ready.then(() => {
         if (message.type === 'GET_CONTROLLER_STATE') {
             sendResponse({
+                identity: { tabId: sender.tab?.id, frameId: sender.frameId ?? 0 },
                 state: {
+                    tabId: state.tabId,
+                    videoFrameId: state.videoFrameId,
+                    videoReady: state.videoReady,
+                    autoSkipOped: state.autoSkipOped,
                     room: state.room,
                     role: state.role,
                     connected: state.connected,
@@ -2888,6 +2929,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
                 autoCorrectionEnabled: state.autoCorrectionEnabled,
                 pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+                autoSkipOped: state.autoSkipOped,
             });
             if (state.autoPause.enabled && !wasEnabled) {
                 startAutoPauseWhenReady();
@@ -2914,6 +2956,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                     pauseOnBufferDelay: state.pauseOnBufferDelay,
                     autoCorrectionEnabled: state.autoCorrectionEnabled,
                     pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+                    autoSkipOped: state.autoSkipOped,
                 });
                 return;
             }
@@ -2945,6 +2988,31 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
                 autoCorrectionEnabled: state.autoCorrectionEnabled,
                 pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+                autoSkipOped: state.autoSkipOped,
+            });
+            return;
+        }
+
+        if (message.type === 'SET_AUTO_SKIP_OPED' && state.connected) {
+            if (state.role !== 'host') return;
+            state.autoSkipOped = message.enabled === true;
+            if (state.autoSkipOped) {
+                // Automatic seeking requires recognized boundaries on the host.
+                const saved = await chrome.storage.local.get('opedSettings');
+                if (!saved.opedSettings?.enabled) {
+                    await chrome.storage.local.set({
+                        opedSettings: { ...saved.opedSettings, enabled: true },
+                    });
+                }
+            }
+            publish();
+            sendRoomEvent('room-settings', {
+                autoPause: state.autoPause,
+                pauseOnBuffer: state.pauseOnBuffer,
+                pauseOnBufferDelay: state.pauseOnBufferDelay,
+                autoCorrectionEnabled: state.autoCorrectionEnabled,
+                pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+                autoSkipOped: state.autoSkipOped,
             });
             return;
         }
@@ -2960,6 +3028,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
                 pauseOnBufferDelay: state.pauseOnBufferDelay,
                 autoCorrectionEnabled: state.autoCorrectionEnabled,
                 pauseAfterAutoSwitch: state.pauseAfterAutoSwitch,
+                autoSkipOped: state.autoSkipOped,
             });
             return;
         }
@@ -3186,6 +3255,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseAfterAutoSwitch = false;
+            state.autoSkipOped = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
@@ -3272,6 +3342,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseAfterAutoSwitch = false;
+            state.autoSkipOped = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];
@@ -3314,6 +3385,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
             state.navigationHistory = [];
             state.autoPause = { enabled: false, duration: 5 };
             state.pauseAfterAutoSwitch = false;
+            state.autoSkipOped = false;
             state.pauseOnBuffer = false;
             state.pauseOnBufferDelay = 5;
             state.bufferingMembers = [];

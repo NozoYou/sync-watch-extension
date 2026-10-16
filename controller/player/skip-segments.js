@@ -1,6 +1,10 @@
 (() => {
     const controller = (window.SyncWatchController ||= {});
 
+    function getTargetTime(video, segment) {
+        return Math.min(video.duration, Math.max(0, segment.end - 3));
+    }
+
     // Skip a configurable amount of time without assuming OP/ED timestamps.
     function skipCurrent(video, requestedSeconds = 85) {
         if (!video) {
@@ -23,7 +27,7 @@
                 return { success: false, message: '当前位置没有匹配的片头或片尾。' };
             }
             // Leave a short lead-in before the detected segment ends.
-            const targetTime = Math.min(video.duration, Math.max(0, segment.end - 3));
+            const targetTime = getTargetTime(video, segment);
             video.currentTime = targetTime;
             return {
                 success: true,
@@ -59,5 +63,5 @@
         return `${minutes} 分 ${remainingSeconds} 秒`;
     }
 
-    controller.skipSegments = { skipCurrent };
+    controller.skipSegments = { skipCurrent, getTargetTime };
 })();

@@ -108,8 +108,8 @@
         </dialog>
 
         <div id="main-menu-panel" class="main-menu-panel hidden">
-            <section id="connection-settings" class="menu-section">
-                <h2 id="settings-summary" class="menu-section-title">连接设置</h2>
+            <details id="connection-settings" class="menu-section">
+                <summary id="settings-summary" class="menu-section-title">连接设置</summary>
                 <label for="server">信令服务器地址</label>
                 <div class="server-row">
                     <input
@@ -126,10 +126,10 @@
                 <p class="small" id="server-help">
                     地址保存在此浏览器扩展中。每位参与者都需配置同一地址。
                 </p>
-            </section>
+            </details>
 
-            <section class="theme-setting menu-section" aria-labelledby="theme-setting-title">
-                <h2 id="theme-setting-title" class="menu-section-title">主题</h2>
+            <details class="theme-setting menu-section" aria-labelledby="theme-setting-title">
+                <summary id="theme-setting-title" class="menu-section-title">主题</summary>
                 <div class="theme-options" role="group" aria-label="选择界面主题">
                     <button class="theme-option" type="button" data-theme="system" aria-pressed="false">
                         <span class="theme-icon theme-icon-system" aria-hidden="true">◐</span>
@@ -144,32 +144,39 @@
                         <span class="theme-option-label">深色</span>
                     </button>
                 </div>
-            </section>
+            </details>
 
-            <section id="playback-settings" class="menu-section feature-menu">
-                <h2 class="menu-section-title">播放设置</h2>
+            <details id="playback-settings" class="menu-section feature-menu">
+                <summary class="menu-section-title">播放设置</summary>
                 <div class="feature-menu-content">
-                    <section class="controller-settings-panel">
-                        <strong>OP/ED 音频识别</strong>
+                    <details class="controller-settings-panel">
+                        <summary>OP/ED 音频识别</summary>
                         <label class="setting-checkbox" for="oped-enabled">
                             <input id="oped-enabled" type="checkbox" />
                             自动识别番剧片头片尾
                         </label>
-                        <label for="oped-mode">检测方式</label>
-                        <select id="oped-mode">
-                            <option value="local">本地浏览器</option>
-                            <option value="cloud">云端服务器</option>
-                        </select>
-                        <div id="oped-cloud-settings" hidden>
+                        <span id="oped-mode-label" class="small">检测方式</span>
+                        <div id="oped-mode" class="oped-mode-options" role="group" aria-labelledby="oped-mode-label">
+                            <label class="oped-mode-option">
+                                <input type="radio" name="oped-mode" value="local" checked />
+                                <span>本地浏览器</span>
+                            </label>
+                            <label class="oped-mode-option">
+                                <input type="radio" name="oped-mode" value="cloud" />
+                                <span>云端服务器</span>
+                            </label>
+                        </div>
+                        <details id="oped-cloud-settings" class="oped-cloud-settings">
+                            <summary>云端配置</summary>
                             <label for="oped-server">云端检测 / 记录服务器地址（本地检测可选）</label>
                             <input id="oped-server" type="url" placeholder="https://oped.example.com" />
                             <label for="oped-token">检测密钥</label>
                             <input id="oped-token" type="password" autocomplete="off" />
-                        </div>
+                        </details>
                         <p class="small" id="oped-status" aria-live="polite"></p>
-                    </section>
-                    <section class="controller-settings-panel">
-                        <strong>页面圆盘控制器</strong>
+                    </details>
+                    <details class="controller-settings-panel">
+                        <summary>页面圆盘控制器</summary>
                         <label class="setting-checkbox" for="block-ads">
                             <input id="block-ads" type="checkbox" />
                             屏蔽网页广告和可跳过的播放器广告
@@ -214,15 +221,19 @@
                         <button id="reset-controller-position" class="quiet" type="button">
                             恢复圆盘默认位置
                         </button>
-                    </section>
+                    </details>
 
-                    <label class="setting-checkbox" for="follow-prompt-enabled">
-                        <input id="follow-prompt-enabled" type="checkbox" />
-                        跟随弹窗
-                    </label>
-                    <p class="small">控制房主分享新视频时是否弹出跟随询问。</p>
+                    <details class="controller-settings-panel">
+                        <summary>跟随弹窗</summary>
+                        <label class="setting-checkbox" for="follow-prompt-enabled">
+                            <input id="follow-prompt-enabled" type="checkbox" />
+                            跟随弹窗
+                        </label>
+                        <p class="small">控制房主分享新视频时是否弹出跟随询问。</p>
+                    </details>
 
-                    <section id="auto-pause-panel" class="auto-pause-panel">
+                    <details id="auto-pause-panel" class="auto-pause-panel controller-settings-panel">
+                        <summary>新视频自动暂停</summary>
                         <label class="setting-checkbox" for="auto-pause">
                             <input id="auto-pause" type="checkbox" />
                             <span id="auto-pause-label">新视频就绪后自动暂停</span>
@@ -243,7 +254,7 @@
                         <p id="auto-pause-owner" class="small hidden">
                             自动暂停时长由房主管理。
                         </p>
-                    </section>
+                    </details>
 
                     <!--
                     <section class="buffering-pause-panel">
@@ -268,10 +279,10 @@
                     </section>
                     -->
                 </div>
-            </section>
+            </details>
 
-            <section id="tab-settings" class="menu-section feature-menu hidden">
-                <h2 class="menu-section-title">标签页设置</h2>
+            <details id="tab-settings" class="menu-section feature-menu hidden">
+                <summary class="menu-section-title">标签页设置</summary>
                 <div class="feature-menu-content">
                     <div class="tab-marker-control">
                         <label class="setting-checkbox" for="modify-tab-icon">
@@ -295,7 +306,7 @@
                         </div>
                     </section>
                 </div>
-            </section>
+            </details>
 
         </div>
 
@@ -370,6 +381,17 @@
                 >
                     分享当前页
                 </button>
+            </section>
+
+            <section id="host-oped-settings" class="member-follow-settings hidden">
+                <label
+                    class="setting-checkbox"
+                    for="auto-skip-oped"
+                    title="自动识别并跳过片头片尾，同步全房间，保留片段末尾 3 秒。"
+                >
+                    <input id="auto-skip-oped" type="checkbox" />
+                    自动跳过 OP/ED
+                </label>
             </section>
 
             <div class="room-meta">

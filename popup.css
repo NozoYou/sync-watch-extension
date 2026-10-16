@@ -107,28 +107,21 @@ header {
 }
 
 .menu-section-title {
-    margin: 0 0 8px;
+    margin: 0;
     color: #e66b91;
     font-size: 12px;
     font-weight: 600;
 }
 
 .theme-setting {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    display: block;
     margin: 0;
     padding: 10px 2px;
     border-radius: 8px;
 }
 
-.theme-setting h2 {
-    flex: 1;
-    margin: 0;
-    color: #49353e;
-    font-size: 13px;
-    font-weight: 500;
+.menu-section[open] > .menu-section-title {
+    margin-bottom: 8px;
 }
 
 .theme-options {
@@ -695,8 +688,7 @@ button:hover {
 }
 
 .controller-settings-panel {
-    display: grid;
-    gap: 7px;
+    display: block;
     margin-bottom: 9px;
     padding: 9px;
     border: 1px solid #e5e2e5;
@@ -704,9 +696,74 @@ button:hover {
     background: #fff;
 }
 
-.controller-settings-panel > strong {
+.controller-settings-panel > summary {
     color: #e66b91;
     font-size: 11px;
+    font-weight: 600;
+}
+
+.controller-settings-panel[open] > summary {
+    margin-bottom: 7px;
+}
+
+.oped-cloud-settings {
+    margin-top: 9px;
+    padding: 8px;
+    border: 1px solid #e5e2e5;
+}
+
+.oped-cloud-settings > summary {
+    font-size: 11px;
+}
+
+.oped-mode-options {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.oped-mode-option {
+    position: relative;
+    flex: 1;
+    margin: 0;
+    cursor: pointer;
+}
+
+.oped-mode-option input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.oped-mode-option span {
+    display: block;
+    padding: 7px 8px;
+    border: 1px solid #e5e2e5;
+    border-radius: 7px;
+    text-align: center;
+    font-size: 11px;
+}
+
+.oped-mode-option input:checked + span {
+    border-color: #fb7299;
+    background: #fff0f5;
+    color: #c84c73;
+}
+
+.oped-mode-option input:focus-visible + span {
+    outline: 2px solid #fb7299;
+    outline-offset: 2px;
+}
+
+body.dark-mode .oped-mode-option span {
+    border-color: #484a4f;
+}
+
+body.dark-mode .oped-mode-option input:checked + span {
+    background: #493039;
+    border-color: #fb7299;
+    color: #ff9cba;
 }
 
 .setting-sub-option {
@@ -1215,10 +1272,6 @@ body.dark-mode .details,
 body.dark-mode details {
     border-color: #484a4f;
     background: #2b2d30;
-    color: #e6e6e6;
-}
-
-body.dark-mode .theme-setting h2 {
     color: #e6e6e6;
 }
 
