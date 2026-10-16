@@ -150,6 +150,25 @@
                 <h2 class="menu-section-title">播放设置</h2>
                 <div class="feature-menu-content">
                     <section class="controller-settings-panel">
+                        <strong>OP/ED 音频识别</strong>
+                        <label class="setting-checkbox" for="oped-enabled">
+                            <input id="oped-enabled" type="checkbox" />
+                            自动识别番剧片头片尾
+                        </label>
+                        <label for="oped-mode">检测方式</label>
+                        <select id="oped-mode">
+                            <option value="local">本地浏览器</option>
+                            <option value="cloud">云端服务器</option>
+                        </select>
+                        <div id="oped-cloud-settings" hidden>
+                            <label for="oped-server">云端检测 / 记录服务器地址（本地检测可选）</label>
+                            <input id="oped-server" type="url" placeholder="https://oped.example.com" />
+                            <label for="oped-token">检测密钥</label>
+                            <input id="oped-token" type="password" autocomplete="off" />
+                        </div>
+                        <p class="small" id="oped-status" aria-live="polite"></p>
+                    </section>
+                    <section class="controller-settings-panel">
                         <strong>页面圆盘控制器</strong>
                         <label class="setting-checkbox" for="block-ads">
                             <input id="block-ads" type="checkbox" />
@@ -186,7 +205,7 @@
                             value="85"
                         />
                         <p class="small">
-                            圆盘上的跳过按钮会向前跳过这段时间，默认 85 秒（1 分 25 秒）。
+                            未使用音频识别时，圆盘跳过按钮按此时长快进；识别开启后仅跳过已匹配的片头片尾。
                         </p>
                         <label class="setting-checkbox" for="controller-rotation">
                             <input id="controller-rotation" type="checkbox" />
@@ -474,6 +493,7 @@
         </footer>
 
         <script src="playback-clock.js"></script>
+        <script src="oped-automation/extension/settings.js"></script>
         <script src="popup.js"></script>
     </body>
 </html>

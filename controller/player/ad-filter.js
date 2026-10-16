@@ -9,6 +9,8 @@
         let enabled = true;
         let blockPromotions = true;
         let scanTimer = null;
+        let feedWakeTimer = null;
+        let feedWakeRequested = false;
 
         const commonAdSelectors = [
             '[data-ad]',
@@ -125,6 +127,7 @@
         function removeBilibiliAdCards() {
             const host = windowRef.location.hostname;
             if (host !== 'bilibili.com' && !host.endsWith('.bilibili.com')) return;
+            let removed = false;
 
             for (const marker of documentRef.querySelectorAll(
                 [
@@ -154,8 +157,24 @@
                 const container = card.closest('.feed-card') ||
                     card.closest('.floor-single-card') ||
                     card.closest('.bili-feed-card') || card;
+                if (!container.isConnected) continue;
                 container.remove();
+                removed = true;
             }
+            if (removed) wakeHomepageFeed();
+        }
+
+        function wakeHomepageFeed() {
+            // Skeleton cards belong to the site's lazy loader, not the ad filter.
+            if (windowRef.location.pathname !== '/' || feedWakeRequested) return;
+            feedWakeRequested = true;
+            feedWakeTimer = windowRef.setTimeout(() => {
+                feedWakeTimer = null;
+                if (!enabled || documentRef.hidden) return;
+                // Notify scroll listeners without changing the viewport position.
+                windowRef.dispatchEvent(new windowRef.Event('scroll'));
+                documentRef.dispatchEvent(new windowRef.Event('scroll'));
+            }, 300);
         }
 
         function skipAvailableVideoAds() {
@@ -265,7 +284,9 @@
             } else {
                 observer.disconnect();
                 windowRef.clearTimeout(scanTimer);
+                windowRef.clearTimeout(feedWakeTimer);
                 scanTimer = null;
+                feedWakeTimer = null;
                 style.remove();
             }
         }
@@ -285,6 +306,7 @@
                 observer.disconnect();
                 eventController.abort();
                 windowRef.clearTimeout(scanTimer);
+                windowRef.clearTimeout(feedWakeTimer);
                 style.remove();
             },
         };

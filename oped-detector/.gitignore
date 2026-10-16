@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+media/
+segments.json
+approved-segments.json

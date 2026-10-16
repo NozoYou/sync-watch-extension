@@ -1,0 +1,8 @@
+{
+  "seriesId": "example-series",
+  "episodes": [
+    { "id": "episode-01", "path": "media/episode-01.mp4", "url": "" },
+    { "id": "episode-02", "path": "media/episode-02.mp4", "url": "" },
+    { "id": "episode-03", "path": "media/episode-03.mp4", "url": "" }
+  ]
+}

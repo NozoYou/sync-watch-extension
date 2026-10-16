@@ -1,0 +1,10 @@
+{
+  "seriesId": "example-series",
+  "continuousSeries": true,
+  "currentEpisodeId": "episode-01",
+  "episodes": [
+    { "id": "episode-01", "number": 1, "url": "https://example.com/episode/1" },
+    { "id": "episode-02", "number": 2, "url": "https://example.com/episode/2" },
+    { "id": "episode-03", "number": 3, "url": "https://example.com/episode/3" }
+  ]
+}

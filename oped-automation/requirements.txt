@@ -1,0 +1,1 @@
+-r ../oped-detector/requirements.txt

@@ -11,6 +11,22 @@
             return { success: false, message: '当前视频暂不支持跳过。' };
         }
 
+        const recognition = window.SyncWatchOpedClient;
+        if (recognition?.enabled) {
+            const segment = recognition.segments.find(item =>
+                video.currentTime >= item.start && video.currentTime < item.end);
+            if (!segment) {
+                return { success: false, message: '当前位置没有匹配的片头或片尾。' };
+            }
+            const targetTime = Math.min(video.duration, segment.end);
+            video.currentTime = targetTime;
+            return {
+                success: true,
+                targetTime,
+                message: segment.type === 'opening' ? '已跳过片头。' : '已跳过片尾。',
+            };
+        }
+
         const seconds = Number.isFinite(Number(requestedSeconds))
             ? Math.max(1, Math.min(3600, Math.round(Number(requestedSeconds))))
             : 85;

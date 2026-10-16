@@ -1,6 +1,7 @@
 // The service worker owns room state and keeps the signaling socket alive
 // while users move between video tabs.
 importScripts('playback-clock.js');
+importScripts('oped-automation/extension/background.js');
 
 let socket = null;
 let pingTimer = null;
@@ -11,6 +12,7 @@ const controllerContentScriptFiles = [
     'controller/core/progress-ring.js',
     'controller/animations/rotation.js',
     'controller/player/skip-segments.js',
+    'oped-automation/extension/client.js',
     'controller/player/ad-filter.js',
     'controller/player/comment-filter.js',
     'controller/panels/create-room.js',
@@ -2256,6 +2258,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender) => {
+    if (message.type?.startsWith('OPED_')) return false;
     ready.then(async () => {
         if (message.type === 'SAVE_CURRENT_PROGRESS') {
             saveCurrentProgress();
