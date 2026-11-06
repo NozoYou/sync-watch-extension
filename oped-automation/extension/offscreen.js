@@ -25,65 +25,71 @@ function log(jobId, step, details = {}) {
     chrome.runtime.sendMessage({ type: 'OPED_LOG', jobId, step, details }).catch(() => {});
 }
 
-async function readAudio(url, signal) {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.bilivideo.com')) {
-        throw new Error('音频地址不属于支持的 B 站媒体域名。');
-    }
-    // Audio is transient input; do not retain another copy in the HTTP cache.
-    const response = await fetch(url, { signal, credentials: 'omit', cache: 'no-store' });
-    if (!response.ok) throw new Error(`音轨下载失败（${response.status}）。`);
-    log(currentJobId, '音轨响应已连接', { status: response.status });
-    const reader = response.body.getReader();
-    const chunks = [];
-    let size = 0;
-    let lastReportedMB = 0;
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        const downloadedMB = Math.floor(size / (1024 * 1024));
-        if (downloadedMB > lastReportedMB) {
-            lastReportedMB = downloadedMB;
-            log(currentJobId, '音轨下载进度', { downloadedMB });
+async function readAudio(episode, signal) {
+    const streaming = episode.id.startsWith('web:');
+    const limit = (streaming ? 512 : 64) * 1024 * 1024;
+    let transferred = 0;
+    const fetchBytes = async url => {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password ||
+            /^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[|.*\.local$)/i.test(parsed.hostname) ||
+            (!streaming && !parsed.hostname.endsWith('.bilivideo.com'))) {
+            throw new Error('不支持的媒体地址。');
         }
-        if (size > 64 * 1024 * 1024) {
-            await reader.cancel();
-            throw new Error('音轨超过 64 MB，已停止下载。');
-        }
-        chunks.push(value);
-    }
-    log(currentJobId, '音轨下载完成', { bytes: size });
-    const buffer = await new Blob(chunks).arrayBuffer();
-    chunks.length = 0;
-    reader.releaseLock();
-    return buffer;
+        const response = await fetch(parsed.href, { signal, credentials: 'omit', cache: 'no-store' });
+        if (!response.ok) throw new Error(`音频下载失败（${response.status}）。`);
+        const reader = response.body.getReader();
+        const chunks = [];
+        let lastReported = Math.floor(transferred / 1048576);
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                transferred += value.length;
+                if (transferred > limit) { await reader.cancel(); throw new Error('媒体下载超过大小限制，已停止。'); }
+                if (Math.floor(transferred / 1048576) > lastReported) {
+                    lastReported = Math.floor(transferred / 1048576);
+                    log(currentJobId, '媒体下载进度', { episodeId: episode.id, downloadedMB: lastReported });
+                }
+                chunks.push(value);
+            }
+        } finally { reader.releaseLock(); }
+        return new Uint8Array(await new Blob(chunks).arrayBuffer());
+    };
+    const media = await SyncWatchMediaLoader.load(episode.audioUrl, { fetchBytes, signal, maxBytes: limit, windowSeconds: streaming ? 302 : 0 });
+    log(currentJobId, '媒体下载完成', { episodeId: episode.id, downloadedBytes: transferred, audioBytes: media.windows ? media.windows.reduce((sum, item) => sum + item.bytes.length, 0) : media.length });
+    return media;
 }
 
 let currentJobId = '';
 
 async function extractEpisodeAudio(episode, jobId, signal) {
     const label = `第 ${episode.number} 集`;
-    await chrome.runtime.sendMessage({ type: 'OPED_PROGRESS', jobId, message: `正在获取${label}低码率音频…` });
-    log(jobId, `${label}：开始下载低码率音轨`, { bandwidth: episode.bandwidth });
-    let bytes = await readAudio(episode.audioUrl, signal);
-    log(jobId, `${label}：开始解码音轨`);
-    let context = new OfflineAudioContext(1, 1, 8000);
-    let decoded = await context.decodeAudioData(bytes);
-    bytes = null;
-    context = null;
-    if (decoded.duration > 3600) throw new Error('暂仅支持单集一小时以内的内容。');
-    log(jobId, `${label}：音轨解码完成`, {
-        durationSeconds: Math.round(decoded.duration),
-        channels: decoded.numberOfChannels,
-        sampleRate: decoded.sampleRate,
-    });
-    const samples = new Float32Array(decoded.length);
-    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
-        const data = decoded.getChannelData(channel);
-        for (let i = 0; i < samples.length; i += 1) samples[i] += data[i] / decoded.numberOfChannels;
+    await chrome.runtime.sendMessage({ type: 'OPED_PROGRESS', jobId, message: `正在获取${label}音频…` });
+    log(jobId, `${label}：开始下载媒体音频`, { bandwidth: episode.bandwidth });
+    let media = await readAudio(episode, signal);
+    const windows = media.windows || [{ start: 0, bytes: media }];
+    let samples = media.duration ? new Float32Array(Math.round(media.duration * 8000)) : null;
+    if (media.windows) log(jobId, `${label}：仅解码首尾分段`, { durationSeconds: media.duration, windows: windows.map(item => ({ start: item.start })) });
+    for (const window of windows) {
+        signal.throwIfAborted();
+        log(jobId, `${label}：开始解码音频`, { startSeconds: window.start });
+        const context = new OfflineAudioContext(1, 1, 8000);
+        const bytes = window.bytes;
+        let decoded = await context.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        window.bytes = null;
+        if (decoded.duration > 3600) throw new Error('暂仅支持单集一小时以内的内容。');
+        samples ||= new Float32Array(decoded.length);
+        const offset = Math.round(window.start * 8000);
+        const length = Math.min(decoded.length, samples.length - offset);
+        for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+            const data = decoded.getChannelData(channel);
+            for (let i = 0; i < length; i += 1) samples[offset + i] += data[i] / decoded.numberOfChannels;
+        }
+        log(jobId, `${label}：分段音频解码完成`, { durationSeconds: Math.round(decoded.duration), channels: decoded.numberOfChannels });
+        decoded = null;
     }
-    decoded = null;
+    media = null;
     if (signal.aborted) throw new Error('检测已取消。');
     log(jobId, `${label}：开始提取音频特征`);
     // Transfer sample ownership to the short-lived worker, then terminate it.
@@ -129,18 +135,23 @@ async function run(job) {
         });
         episodes.length = 0;
         let recordStatus = result.recordStatus || 'not_configured';
-        if (job.settings.mode !== 'cloud' && job.settings.server && job.settings.token) {
+        if (job.settings.mode !== 'cloud' && job.settings.server) {
             try {
+                const anonymousReport = job.reportOnly || !job.settings.token;
                 const server = new URL(job.settings.server);
                 const isLocal = server.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(server.hostname);
                 if (server.protocol !== 'https:' && !isLocal) throw new Error('Invalid record server.');
                 // Local analysis uploads only the result and viewing metadata.
-                const response = await fetch(`${job.settings.server.replace(/\/$/, '')}/records`, {
+                const response = await fetch(`${job.settings.server.replace(/\/$/, '')}${anonymousReport ? '/reports' : '/records'}`, {
                     method: 'POST', signal: AbortSignal.any([control.signal, AbortSignal.timeout(15000)]),
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${job.settings.token}` },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(anonymousReport ? {} : { Authorization: `Bearer ${job.settings.token}` }),
+                    },
                     body: JSON.stringify({ metadata: job.metadata, result }),
                 });
-                recordStatus = response.ok ? 'saved' : 'failed';
+                recordStatus = response.ok
+                    ? (anonymousReport ? (await response.json()).reportStatus : 'saved') : 'failed';
                 log(job.jobId, '云端记录上传完成', { status: response.status, saved: response.ok });
             } catch {
                 recordStatus = 'failed';

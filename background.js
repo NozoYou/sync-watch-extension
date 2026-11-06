@@ -10,6 +10,9 @@ let automaticOpedTarget = null;
 let nextPingId = 0;
 const pendingLatencyPings = new Map();
 const controllerContentScriptFiles = [
+    'controller/player/streaming-ad-policy.js',
+    'controller/player/popup-guard-settings.js',
+    'oped-automation/shared/streaming-sites.js',
     'controller/core/progress-ring.js',
     'controller/animations/rotation.js',
     'controller/player/skip-segments.js',

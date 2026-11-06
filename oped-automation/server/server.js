@@ -1,7 +1,8 @@
-// The cloud service accepts fingerprints or final records and never fetches media.
+// The cloud service verifies replacement reports with independently fetched audio.
 const http = require('node:http');
 const crypto = require('node:crypto');
-const { saveRecords } = require('./record-store');
+const { saveRecords, lookupRecords, saveReport } = require('./record-store');
+const { queueVerification } = require('./independent-verifier');
 require('../extension/audio-core.js');
 
 const token = process.env.OPED_TOKEN;
@@ -12,7 +13,8 @@ const port = Number(process.env.OPED_PORT || 8788);
 const host = process.env.OPED_HOST || '127.0.0.1';
 const expected = Buffer.from(`Bearer ${token}`);
 let busy = false;
-const episodeIdentity = /^(?:\d{1,20}|ugc:BV[0-9A-Za-z]{10}:p[1-9]\d{0,3})$/;
+const reportsByAddress = new Map();
+const { validEpisode } = require('./identities');
 
 function authorized(request) {
     const supplied = Buffer.from(request.headers.authorization || '');
@@ -28,7 +30,7 @@ function validate(body) {
     if (!Array.isArray(body.episodes) || body.episodes.length !== 3) throw new Error('Three episodes required.');
     const identifiers = new Set();
     for (const episode of body.episodes) {
-        if (typeof episode.id !== 'string' || !episodeIdentity.test(episode.id) || identifiers.has(episode.id)) throw new Error('Invalid episode identity.');
+        if (typeof episode.id !== 'string' || !validEpisode(episode.id) || identifiers.has(episode.id)) throw new Error('Invalid episode identity.');
         identifiers.add(episode.id);
         if (!Number.isFinite(episode.duration) || episode.duration < 2 || episode.duration > 3600) throw new Error('Invalid duration.');
         if (!Array.isArray(episode.features) || !Array.isArray(episode.energies)) throw new Error('Missing fingerprints.');
@@ -43,10 +45,40 @@ function validate(body) {
 }
 
 const server = http.createServer(async (request, response) => {
-    if (request.method !== 'POST' || !['/detect', '/records'].includes(request.url)) return respond(response, 404, { error: 'Not found.' });
-    if (!authorized(request)) return respond(response, 401, { error: 'Unauthorized.' });
-    if (busy) return respond(response, 429, { error: 'A detection task is already running.' });
-    busy = true;
+    if (request.method === 'GET' && request.url?.startsWith('/records/lookup?')) {
+        try {
+            const ids = new URL(request.url, 'http://localhost').searchParams.getAll('id');
+            if (!ids.length || ids.length > 100 || ids.some(id => !validEpisode(id))) {
+                return respond(response, 400, { error: 'Invalid episode identities.' });
+            }
+            return respond(response, 200, { records: await lookupRecords(ids) });
+        } catch {
+            return respond(response, 500, { error: 'Record lookup failed.' });
+        }
+    }
+    if (request.method !== 'POST' || !['/detect', '/records', '/reports'].includes(request.url)) return respond(response, 404, { error: 'Not found.' });
+    if (request.url !== '/reports' && !authorized(request)) return respond(response, 401, { error: 'Unauthorized.' });
+    let address;
+    if (request.url === '/reports') {
+        const now = Date.now();
+        const proxyAddress = request.headers['x-real-ip'];
+        const direct = request.socket.remoteAddress || 'unknown';
+        address = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(direct) &&
+            typeof proxyAddress === 'string' && /^(?:[0-9a-fA-F:.]+)$/.test(proxyAddress)
+            ? proxyAddress : direct;
+        const recent = (reportsByAddress.get(address) || []).filter(at => now - at < 3600000);
+        if (recent.length >= 200) return respond(response, 429, { error: 'Report limit reached.' });
+        recent.push(now);
+        reportsByAddress.set(address, recent);
+        if (reportsByAddress.size > 1000) {
+            for (const [key, timestamps] of reportsByAddress) {
+                if (timestamps[timestamps.length - 1] < now - 3600000) reportsByAddress.delete(key);
+            }
+        }
+    } else {
+        if (busy) return respond(response, 429, { error: 'A detection task is already running.' });
+        busy = true;
+    }
     try {
         const chunks = [];
         let bytes = 0;
@@ -59,6 +91,20 @@ const server = http.createServer(async (request, response) => {
             chunks.push(chunk);
         }
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (request.url === '/reports') {
+            const reporter = crypto.createHmac('sha256', token).update(address).digest('hex');
+            const result = await saveReport(body.metadata, body.result, reporter);
+            console.info('OP/ED report stored', {
+                seriesId: body.metadata.seriesId,
+                episodeIds: result.episodes.map(item => item.id),
+                status: result.reportStatus,
+                eligibleIds: result.eligible,
+            });
+            if (result.eligible.length) {
+                queueVerification(body.metadata, result.episodes, result.eligible);
+            }
+            return respond(response, 202, { reportStatus: result.reportStatus });
+        }
         if (request.url === '/records') {
             await saveRecords(body.metadata, body.result);
             return respond(response, 200, { recordStatus: 'saved' });
@@ -77,10 +123,11 @@ const server = http.createServer(async (request, response) => {
             }
         }
         respond(response, 200, { ...result, recordStatus });
-    } catch {
+    } catch (error) {
+        console.error('OP/ED request failed', { route: request.url, error: error.message });
         if (!response.headersSent) respond(response, 400, { error: 'Invalid fingerprint data.' });
     } finally {
-        busy = false;
+        if (request.url !== '/reports') busy = false;
     }
 });
 server.requestTimeout = 60000;

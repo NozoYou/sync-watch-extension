@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "一起看 · Sync Watch",
-    "version": "0.13.2",
+    "version": "0.14.0",
     "description": "和朋友的视频同步播放插件。",
     "icons": {
         "16": "icons/together_watch_light.png",
@@ -18,7 +18,11 @@
         "offscreen",
         "declarativeNetRequestWithHostAccess"
     ],
-    "host_permissions": ["<all_urls>", "https://*/*", "http://*/*"],
+    "host_permissions": [
+        "<all_urls>",
+        "https://*/*",
+        "http://*/*"
+    ],
     "action": {
         "default_title": "一起看",
         "default_icon": {
@@ -49,13 +53,43 @@
                 "controller/styles/style-1/style.css",
                 "controller/animations/rotation.css"
             ],
-            "matches": ["<all_urls>"]
+            "matches": [
+                "<all_urls>"
+            ]
         }
     ],
     "content_scripts": [
         {
-            "matches": ["<all_urls>"],
+            "matches": [
+                "<all_urls>"
+            ],
             "js": [
+                "controller/player/streaming-ad-policy.js",
+                "controller/player/popup-guard.js"
+            ],
+            "run_at": "document_start",
+            "world": "MAIN",
+            "all_frames": true,
+            "match_origin_as_fallback": true
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "controller/player/streaming-ad-policy.js",
+                "controller/player/popup-guard-settings.js"
+            ],
+            "run_at": "document_start",
+            "all_frames": true,
+            "match_origin_as_fallback": true
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "oped-automation/shared/streaming-sites.js",
                 "controller/core/progress-ring.js",
                 "controller/animations/rotation.js",
                 "controller/player/skip-segments.js",

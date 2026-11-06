@@ -1,6 +1,9 @@
 /* Render recognized ranges on the site's timeline without intercepting input. */
 (() => {
     const trackSelectors = [
+        '.art-progress-inner',
+        '.dplayer-bar-wrap',
+        '.vjs-progress-holder',
         '.bpx-player-progress-schedule',
         '.bpx-player-progress-schedule-wrap',
         '.squirtle-progress-totalline',

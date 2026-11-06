@@ -42,7 +42,11 @@
     function viewingUrl(id) {
         if (/^\d{1,20}$/.test(id)) return `https://www.bilibili.com/bangumi/play/ep${id}`;
         const match = id.match(/^ugc:(BV[0-9A-Za-z]{10}):p([1-9]\d{0,3})$/);
-        if (!match) throw new Error('Invalid episode identity.');
+        if (!match) {
+            const url = SyncWatchStreamingSites.episodeUrl(id);
+            if (!url) throw new Error('Invalid episode identity.');
+            return url;
+        }
         return `https://www.bilibili.com/video/${match[1]}/${match[2] === '1' ? '' : `?p=${match[2]}`}`;
     }
 
@@ -55,6 +59,7 @@
                 document.series.push(series);
             }
             series.title = metadata.title;
+            series.sourceDomain = metadata.sourceDomain || new URL(viewingUrl(result.episodes[0].id)).hostname;
             for (const episode of result.episodes) {
                 const source = metadata.episodes.find(item => item.id === episode.id);
                 if (!source) continue;
@@ -63,6 +68,7 @@
                     id: episode.id,
                     number: String(source.number),
                     url: viewingUrl(episode.id),
+                    sourceDomain: new URL(viewingUrl(episode.id)).hostname,
                     duration: episode.duration ?? null,
                     updatedAt: new Date().toISOString(),
                     opening: null,

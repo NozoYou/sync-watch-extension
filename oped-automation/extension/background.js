@@ -2,6 +2,7 @@
 importScripts(
     'oped-automation/extension/local-record-store.js',
     'oped-automation/extension/season-queue.js',
+    'oped-automation/shared/streaming-sites.js',
 );
 (() => {
     const defaults = { enabled: false, mode: 'local', server: '', token: '' };
@@ -235,9 +236,42 @@ importScripts(
         };
     }
 
+    async function resolveEpisodes(tabId, pageUrl, options = {}) {
+        if (SyncWatchStreamingSites.identify(pageUrl)) {
+            const readPage = async target => {
+                const url = new URL(target);
+                if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
+                    /^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[|.*\.local$)/i.test(url.hostname)) {
+                    throw new Error('Unsupported streaming source URL.');
+                }
+                const response = await fetch(url.href, { credentials: 'omit', signal: AbortSignal.timeout(25000) });
+                if (!response.ok) throw new Error(`Source page HTTP ${response.status}`);
+                const reader = response.body.getReader();
+                const parts = [];
+                let size = 0;
+                for (;;) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    size += value.length;
+                    if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error('Source page is too large.'); }
+                    parts.push(value);
+                }
+                return { html: await new Blob(parts).text(), url: response.url };
+            };
+            return SyncWatchStreamingSites.discover(pageUrl, readPage, options);
+        }
+        const [execution] = await chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] }, world: 'MAIN', func: discoverEpisodes,
+            args: [pageUrl, options],
+        });
+        return execution?.result;
+    }
+
     function episodeId(url) {
         try {
             const parsed = new URL(url);
+            const streaming = SyncWatchStreamingSites.identify(url);
+            if (streaming) return streaming.episodeId;
             if (parsed.hostname !== 'www.bilibili.com') return '';
             const video = parsed.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/);
             if (video) {
@@ -261,6 +295,48 @@ importScripts(
         }
     }
 
+    async function cloudRecords(ids, settings) {
+        if (!ids.length || !settings.server) return {};
+        try {
+            const server = new URL(settings.server);
+            if (server.protocol !== 'https:' &&
+                !(server.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(server.hostname))) return {};
+            const query = new URLSearchParams();
+            for (const id of ids.slice(0, 100)) query.append('id', id);
+            const response = await fetch(`${server.href.replace(/\/$/, '')}/records/lookup?${query}`, {
+                signal: AbortSignal.timeout(6000), cache: 'no-store',
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const records = (await response.json()).records || {};
+            const valid = {};
+            for (const id of ids) {
+                const record = records[id];
+                if (!record || !Number.isFinite(record.duration) || record.duration <= 0 ||
+                    !Array.isArray(record.segments) || record.segments.length > 2 ||
+                    !record.segments.every(segment =>
+                        ['opening', 'ending'].includes(segment.type) &&
+                        Number.isFinite(segment.start) && Number.isFinite(segment.end) &&
+                        segment.start >= 0 && segment.end > segment.start &&
+                        segment.end <= record.duration)) continue;
+                valid[id] = { ...record, savedAt: Date.now() };
+            }
+            return valid;
+        } catch (error) {
+            log('云端记录查询失败，继续本地识别', { message: error.message });
+            return {};
+        }
+    }
+
+    async function rememberCloudRecords(records) {
+        if (!Object.keys(records).length) return;
+        const saved = await chrome.storage.local.get('opedResults');
+        const results = { ...saved.opedResults, ...records };
+        const entries = Object.entries(results)
+            .sort((a, b) => b[1].savedAt - a[1].savedAt).slice(0, 100);
+        await chrome.storage.local.set({ opedResults: Object.fromEntries(entries) });
+        log('已读取云端识别结果', { count: Object.keys(records).length });
+    }
+
     function queueSeason(sender, pageUrl) {
         const key = `${sender.tab.id}:${episodeId(pageUrl) || new URL(pageUrl).pathname}`;
         if (queuedSeasons.has(key)) return;
@@ -276,13 +352,7 @@ importScripts(
     async function prepareSeason(sender, pageUrl) {
         const saved = await chrome.storage.local.get('opedSettings');
         if (!saved.opedSettings?.enabled) return;
-        const [execution] = await chrome.scripting.executeScript({
-            target: { tabId: sender.tab.id, frameIds: [0] },
-            world: 'MAIN',
-            func: discoverEpisodes,
-            args: [pageUrl, { catalogOnly: true }],
-        });
-        const catalog = execution?.result;
+        const catalog = await resolveEpisodes(sender.tab.id, pageUrl, { catalogOnly: true });
         if (!catalog || catalog.stale) return;
         // Migrate pre-existing browser cache entries without redownloading audio.
         try {
@@ -316,20 +386,26 @@ importScripts(
         const saved = await chrome.storage.local.get(['opedSettings', 'opedResults']);
         if (!saved.opedSettings?.enabled || preparing) return;
         const session = await chrome.storage.session.get([
-            'opedSeasonQueue', 'opedActiveJob', 'opedFailedEpisodes',
+            'opedSeasonQueue', 'opedActiveJob', 'opedFailedEpisodes', 'opedForceQueue',
         ]);
         const queue = session.opedSeasonQueue;
         if (!queue || session.opedActiveJob) return;
+        const forceQueue = session.opedForceQueue?.seriesId === queue.seriesId ? session.opedForceQueue : null;
+        const cloud = forceQueue ? {} : await cloudRecords(queue.episodeOrder, saved.opedSettings);
+        if (!forceQueue) await rememberCloudRecords(cloud);
         const known = new Set(Object.entries(saved.opedResults || {})
             .filter(([, value]) => hasFreshResult(value)).map(([id]) => id));
+        for (const id of Object.keys(cloud)) known.add(id);
         try {
             for (const id of await SyncWatchOpedRecords.knownEpisodes(queue.seriesId)) known.add(id);
         } catch (error) {
             log('本地记录文件读取失败，使用浏览器缓存继续', { message: error.message });
         }
         const failed = session.opedFailedEpisodes || [];
-        const episodeIds = SyncWatchOpedQueue.nextBatch(queue.episodeOrder, [...known], failed);
+        const episodeIds = SyncWatchOpedQueue.nextBatch(queue.episodeOrder,
+            forceQueue ? forceQueue.completed : [...known], failed);
         if (!episodeIds.length) {
+            if (forceQueue) await chrome.storage.session.remove('opedForceQueue');
             await status('当前系列的可检测视频已处理完成；结果已缓存。');
             log('整季检测队列已完成', { series: queue.title, completed: known.size, failed: failed.length });
             return;
@@ -345,7 +421,7 @@ importScripts(
         await start({ tab }, tab.url, episodeIds);
     }
 
-    async function start(sender, pageUrl, backgroundEpisodeIds = null) {
+    async function start(sender, pageUrl, backgroundEpisodeIds = null, force = false) {
         const url = new URL(pageUrl || 'https://invalid.local');
         const id = episodeId(url.href);
         const reply = (result) => ({ pageUrl: url.href, episodeId: id, ...result });
@@ -353,9 +429,9 @@ importScripts(
         const settings = { ...defaults, ...saved.opedSettings };
         log('收到识别请求', { mode: settings.mode, enabled: settings.enabled, episodeId: id });
         if (!settings.enabled) return reply({ enabled: false });
-        if (!sender.tab || url.hostname !== 'www.bilibili.com' ||
-            !(/^\/bangumi\/play\/(ep|ss)\d+/.test(url.pathname) ||
-                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(url.pathname))) {
+        if (!sender.tab || !(SyncWatchStreamingSites.identify(url.href) ||
+            (url.hostname === 'www.bilibili.com' && (/^\/bangumi\/play\/(ep|ss)\d+/.test(url.pathname) ||
+                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(url.pathname))))) {
             return reply({ enabled: true, unsupported: true });
         }
         // SPA navigation can leave sender.url pointing at the original episode.
@@ -367,22 +443,33 @@ importScripts(
             log('剧集已切换，忽略旧页面请求', { episodeId: id });
             return reply({ enabled: true, pending: true });
         }
-        const cached = backgroundEpisodeIds ? null : await cachedEpisode(id, saved.opedResults);
+        const cached = backgroundEpisodeIds || force ? null : await cachedEpisode(id, saved.opedResults);
         if (cached) {
             log('使用本地缓存结果', { episodeId: id, segments: cached.segments });
             queueSeason(sender, url.href);
             return reply({ enabled: true, segments: cached.segments });
         }
+        if (!backgroundEpisodeIds && !force && id) {
+            const remote = (await cloudRecords([id], settings))[id];
+            if (remote) {
+                await rememberCloudRecords({ [id]: remote });
+                queueSeason(sender, url.href);
+                return reply({ enabled: true, segments: remote.segments });
+            }
+        }
         const { opedActiveJob, opedFailedEpisodes } = await chrome.storage.session.get(['opedActiveJob', 'opedFailedEpisodes']);
-        if (!backgroundEpisodeIds && id && opedFailedEpisodes?.includes(id)) {
+        if (!backgroundEpisodeIds && !force && id && opedFailedEpisodes?.includes(id)) {
             return reply({ enabled: true, error: '检测失败；调整配置后重新开启识别可重试。' });
         }
         if (preparing || (opedActiveJob && Date.now() - opedActiveJob.startedAt < 16 * 60000)) {
-            return reply({ enabled: true, pending: true });
+            return reply(force
+                ? { enabled: true, error: '已有识别任务正在运行，请稍后重试。' }
+                : { enabled: true, pending: true });
         }
         preparing = true;
         try {
-            if (settings.mode === 'cloud') {
+            const activeForceQueue = (await chrome.storage.session.get('opedForceQueue')).opedForceQueue;
+            if (settings.mode === 'cloud' && !force && !(backgroundEpisodeIds && activeForceQueue)) {
                 const server = new URL(settings.server);
                 if (server.protocol !== 'https:' && !(server.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(server.hostname))) {
                     throw new Error('云端地址需要 HTTPS，本机可使用 HTTP。');
@@ -391,12 +478,9 @@ importScripts(
             }
             await status(backgroundEpisodeIds
                 ? '正在后台提前识别后续剧集的片头片尾…'
-                : '正在获取视频目录和低码率音轨…');
-            log('开始获取视频目录和三集低码率音轨信息');
-            const [execution] = await chrome.scripting.executeScript({
-                target: { tabId: sender.tab.id, frameIds: [0] }, world: 'MAIN', func: discoverEpisodes,
-                args: [url.href, { episodeIds: backgroundEpisodeIds }],
-            });
+                : '正在获取视频目录和可用音频…');
+            log('开始获取视频目录和三集音频信息');
+            const execution = { result: await resolveEpisodes(sender.tab.id, url.href, { episodeIds: backgroundEpisodeIds }) };
             if (execution?.result?.stale) {
                 if (backgroundEpisodeIds) scheduleNextBatch();
                 return reply({ enabled: true, pending: true });
@@ -407,7 +491,7 @@ importScripts(
                 episodes: execution.result.episodes.map(item => ({ number: item.number, bandwidth: item.bandwidth })),
             });
             await saveSeasonQueue(execution.result.catalog, sender.tab.id);
-            const resolvedCache = backgroundEpisodeIds ? null :
+            const resolvedCache = backgroundEpisodeIds || force ? null :
                 await cachedEpisode(execution.result.currentId, saved.opedResults);
             if (resolvedCache) {
                 log('使用本地缓存结果', { episodeId: execution.result.currentId, segments: resolvedCache.segments });
@@ -419,13 +503,28 @@ importScripts(
             if (JSON.stringify({ ...defaults, ...latest.opedSettings }) !== JSON.stringify(settings)) {
                 return reply({ enabled: true, pending: true });
             }
+            if (force) {
+                if (!settings.server) throw new Error('重新识别上报需要配置云端地址。');
+                const reportServer = new URL(settings.server);
+                if (reportServer.protocol !== 'https:' &&
+                    !(reportServer.protocol === 'http:' &&
+                        ['localhost', '127.0.0.1'].includes(reportServer.hostname))) {
+                    throw new Error('云端地址需要 HTTPS，本机可使用 HTTP。');
+                }
+                await chrome.storage.session.set({ opedForceQueue: {
+                    seriesId: execution.result.catalog.seriesId, completed: [],
+                } });
+                await chrome.storage.session.remove('opedFailedEpisodes');
+            }
+            const forceQueue = (await chrome.storage.session.get('opedForceQueue')).opedForceQueue;
+            const reportOnly = force || forceQueue?.seriesId === execution.result.catalog.seriesId;
             // Only extension-origin CDN requests receive the site's required referer.
             await chrome.declarativeNetRequest.updateSessionRules({
                 removeRuleIds: [120001],
                 addRules: [{
                     id: 120001, priority: 1,
-                    action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: 'https://www.bilibili.com/' }] },
-                    condition: { initiatorDomains: [chrome.runtime.id], requestDomains: ['bilivideo.com'], resourceTypes: ['xmlhttprequest'] },
+                    action: { type: 'modifyHeaders', requestHeaders: [{ header: 'Referer', operation: 'set', value: `${url.origin}/` }] },
+                    condition: { initiatorDomains: [chrome.runtime.id], ...(SyncWatchStreamingSites.identify(url.href) ? {} : { requestDomains: ['bilivideo.com'] }), resourceTypes: ['xmlhttprequest'] },
                 }],
             });
             await ensureDocument();
@@ -436,11 +535,15 @@ importScripts(
                     jobId,
                     startedAt: Date.now(),
                     prefetch: Boolean(backgroundEpisodeIds),
+                    reportOnly,
                     episodeIds: execution.result.episodes.map(item => item.id),
                 },
             });
             const response = await chrome.runtime.sendMessage({
-                type: 'OPED_RUN', job: { ...execution.result, settings, jobId },
+                type: 'OPED_RUN', job: {
+                    ...execution.result, settings: reportOnly ? { ...settings, mode: 'local' } : settings,
+                    jobId, reportOnly,
+                },
             });
             if (!response?.success) throw new Error('后台检测任务尚未结束，请稍后重试。');
             return reply({ enabled: true, pending: true });
@@ -455,17 +558,31 @@ importScripts(
                 });
                 scheduleNextBatch();
             }
+            if (force) await chrome.storage.session.remove('opedForceQueue');
             return reply({ enabled: true, error: error.message });
         } finally { preparing = false; }
     }
 
     chrome.runtime.onMessage.addListener((message, sender, respond) => {
+        if (message.type === 'OPED_PAGE_CONTEXT') {
+            if (!sender.tab?.id) return;
+            chrome.tabs.get(sender.tab.id).then(tab => respond({ pageUrl: tab.url }), () => respond({}));
+            return true;
+        }
         if (message.type === 'OPED_START') {
             start(sender, message.pageUrl).then(respond, () => respond({
                 pageUrl: message.pageUrl,
                 episodeId: episodeId(message.pageUrl),
                 error: '检测启动失败。',
             }));
+            return true;
+        }
+        if (message.type === 'OPED_REDETECT') {
+            (async () => {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (!tab?.url) return { error: '请先打开支持的网站播放页。' };
+                return start({ tab }, tab.url, null, true);
+            })().then(respond, error => respond({ error: error.message }));
             return true;
         }
         const trusted = sender.url === chrome.runtime.getURL('oped-automation/extension/offscreen.html');
@@ -488,7 +605,8 @@ importScripts(
                 let localRecordNote = '';
                 try {
                     await SyncWatchOpedRecords.save(
-                        message.metadata, message.result, opedActiveJob.prefetch,
+                        message.metadata, message.result,
+                        opedActiveJob.prefetch && !opedActiveJob.reportOnly,
                     );
                     log('已写入电脑本地记录文件', { file: 'oped-records.json' });
                 } catch (error) {
@@ -498,7 +616,8 @@ importScripts(
                 for (const episode of message.result?.episodes || []) {
                     if (!message.episodeIds.includes(episode.id)) continue;
                     // Preparing future episodes must not replace a usable current result.
-                    if (opedActiveJob.prefetch && hasFreshResult(results[episode.id])) continue;
+                    if (opedActiveJob.prefetch && !opedActiveJob.reportOnly &&
+                        hasFreshResult(results[episode.id])) continue;
                     const segments = (episode.segments || []).filter(item =>
                         ['opening', 'ending'].includes(item.type) && Number.isFinite(item.start) &&
                         Number.isFinite(item.end) && item.start >= 0 && item.end > item.start && item.end <= episode.duration);
@@ -506,13 +625,27 @@ importScripts(
                 }
                 const entries = Object.entries(results).sort((a, b) => b[1].savedAt - a[1].savedAt).slice(0, 100);
                 await chrome.storage.local.set({ opedResults: Object.fromEntries(entries) });
+                if (opedActiveJob.reportOnly) {
+                    const session = await chrome.storage.session.get('opedForceQueue');
+                    const forceQueue = session.opedForceQueue;
+                    if (forceQueue?.seriesId === message.metadata?.seriesId) {
+                        await chrome.storage.session.set({ opedForceQueue: {
+                            ...forceQueue,
+                            completed: [...new Set([...forceQueue.completed,
+                                ...message.result.episodes.map(item => item.id)])],
+                        } });
+                    }
+                }
                 log('检测完成并已更新本地结果', {
                     episodes: message.result?.episodes?.length || 0,
                     recordStatus: message.recordStatus,
                 });
                 const recordNote = message.recordStatus === 'failed'
-                    ? '云端记录保存失败。'
-                    : message.recordStatus === 'saved' ? '已保存云端记录。' : '';
+                    ? '云端上报失败。'
+                    : message.recordStatus === 'pending_quorum' ? '已上报候选结果，等待更多独立来源确认。'
+                        : message.recordStatus === 'pending_verification' ? '已上报结果，服务器正在独立核验。'
+                        : message.recordStatus === 'promoted' ? '云端记录已自动更新。'
+                        : message.recordStatus === 'saved' ? '已保存云端记录。' : '';
                 await status(`本批检测完成；后续剧集将继续后台处理。${localRecordNote}${recordNote}`);
             }
             if (message.type === 'OPED_FAILED') {
@@ -537,7 +670,7 @@ importScripts(
         clearTimeout(nextBatchTimer);
         nextBatchTimer = null;
         chrome.runtime.sendMessage({ type: 'OPED_CANCEL' }).catch(() => {});
-        chrome.storage.session.remove(['opedActiveJob', 'opedFailedEpisodes', 'opedSeasonQueue']);
+        chrome.storage.session.remove(['opedActiveJob', 'opedFailedEpisodes', 'opedSeasonQueue', 'opedForceQueue']);
         chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [120001] });
     });
 })();

@@ -11,6 +11,9 @@
         let scanTimer = null;
         let feedWakeTimer = null;
         let feedWakeRequested = false;
+        const streamingPolicy = windowRef.SyncWatchStreamingAdPolicy;
+        const streamingPage = streamingPolicy?.applies(windowRef) === true;
+        const blockedOverlays = new Set();
 
         const commonAdSelectors = [
             '[data-ad]',
@@ -30,6 +33,13 @@
 
         function selectorsForPage() {
             const host = windowRef.location.hostname;
+
+            if (streamingPage) {
+                return [...commonAdSelectors, ...streamingPolicy.selectors,
+                    '[data-sync-watch-ad-overlay]',
+                    '.global_notice_box', '.global_notice_wrapper',
+                    'a.nav-download-link', '.text_list_box.links'];
+            }
 
             if (host === 'bilibili.com' || host.endsWith('.bilibili.com')) {
                 return [
@@ -101,7 +111,26 @@
                 scanTimer = null;
                 removeBilibiliAdCards();
                 skipAvailableVideoAds();
+                hideStreamingOverlays();
             }, 300);
+        }
+
+        function hideStreamingOverlays() {
+            if (!streamingPage) return;
+            for (const overlay of blockedOverlays) if (!overlay.isConnected) blockedOverlays.delete(overlay);
+            for (const anchor of documentRef.querySelectorAll('a[href]')) {
+                if (blockedOverlays.has(anchor) || anchor.querySelector('video, iframe')) continue;
+                let url;
+                try { url = new URL(anchor.href, windowRef.location.href); } catch { continue; }
+                if (!['http:', 'https:'].includes(url.protocol) || url.origin === windowRef.location.origin) continue;
+                const css = windowRef.getComputedStyle(anchor);
+                const bounds = anchor.getBoundingClientRect();
+                if (css.position !== 'fixed' || Number(css.zIndex) < 100 ||
+                    bounds.width < windowRef.innerWidth * 0.5 || bounds.height < windowRef.innerHeight * 0.5) continue;
+                // Only suppress an external overlay, never the actual player element.
+                anchor.setAttribute('data-sync-watch-ad-overlay', 'true');
+                blockedOverlays.add(anchor);
+            }
         }
 
         function isBilibiliPromotionIcon(icon) {
@@ -258,6 +287,9 @@
 
         function setEnabled(nextEnabled) {
             enabled = nextEnabled !== false;
+            if (streamingPage) windowRef.postMessage({
+                type: 'SYNC_WATCH_AD_GUARD_SETTINGS', enabled,
+            }, '*');
             if (enabled) {
                 const host = windowRef.location.hostname;
                 const isBilibili = host === 'bilibili.com' ||
@@ -288,6 +320,8 @@
                 scanTimer = null;
                 feedWakeTimer = null;
                 style.remove();
+                for (const overlay of blockedOverlays) overlay.removeAttribute('data-sync-watch-ad-overlay');
+                blockedOverlays.clear();
             }
         }
 
@@ -308,6 +342,8 @@
                 windowRef.clearTimeout(scanTimer);
                 windowRef.clearTimeout(feedWakeTimer);
                 style.remove();
+                for (const overlay of blockedOverlays) overlay.removeAttribute('data-sync-watch-ad-overlay');
+                blockedOverlays.clear();
             },
         };
     }

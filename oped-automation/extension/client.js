@@ -1,6 +1,7 @@
 (() => {
-    if (window !== window.top || window.SyncWatchOpedClient) return;
+    if (window.SyncWatchOpedClient) return;
     const client = window.SyncWatchOpedClient = { enabled: false, segments: [], pageUrl: '', pending: false };
+    let sourcePage = window === window.top ? location.href : '';
     let previousUrl = '';
     let requestedAt = 0;
     let pending = false;
@@ -20,12 +21,16 @@
     }
 
     function refreshAvailability() {
-        client.enabled = settingEnabled && location.hostname === 'www.bilibili.com' &&
-            (/^\/bangumi\/play\/(ep|ss)\d+/.test(location.pathname) ||
-                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(location.pathname));
+        if (!sourcePage) { client.enabled = false; return; }
+        const url = new URL(sourcePage);
+        client.enabled = settingEnabled && Boolean(window.SyncWatchStreamingSites?.identify(sourcePage) ||
+            (url.hostname === 'www.bilibili.com' && (/^\/bangumi\/play\/(ep|ss)\d+/.test(url.pathname) ||
+                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(url.pathname))));
     }
 
     function pageEpisodeId(url) {
+        const streaming = window.SyncWatchStreamingSites?.identify(url);
+        if (streaming) return streaming.episodeId;
         const parsed = new URL(url);
         const video = parsed.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/);
         if (video) {
@@ -36,8 +41,14 @@
     }
 
     async function update(force = false) {
-        if (location.href !== previousUrl) {
-            previousUrl = location.href;
+        if (busy) { refreshQueued ||= force; return; }
+        try {
+            sourcePage = window === window.top ? location.href :
+                (await chrome.runtime.sendMessage({ type: 'OPED_PAGE_CONTEXT' }))?.pageUrl || '';
+        } catch { return; }
+        if (!sourcePage) return;
+        if (sourcePage !== previousUrl) {
+            previousUrl = sourcePage;
             pageVersion += 1;
             requestedAt = 0;
             client.segments = [];
@@ -54,12 +65,12 @@
         }
         if (!force && requestedAt && (!pending || Date.now() - requestedAt < 15000)) return;
         busy = true;
-        const page = location.href;
+        const page = sourcePage;
         const version = pageVersion;
         try {
             requestedAt = Date.now();
             const reply = await chrome.runtime.sendMessage({ type: 'OPED_START', pageUrl: page });
-            if (page !== location.href || version !== pageVersion) return;
+            if ((window === window.top && page !== location.href) || page !== sourcePage || version !== pageVersion) return;
             // Never apply a result returned for another episode or an earlier route.
             const currentId = pageEpisodeId(page);
             if (reply?.pageUrl !== page || (currentId && reply.episodeId !== currentId)) {
@@ -71,7 +82,8 @@
             }
             client.enabled = settingEnabled && reply?.enabled === true && !reply?.unsupported;
             client.segments = reply?.segments || [];
-            client.pageUrl = page;
+            client.pageUrl = location.href;
+            client.sourcePageUrl = page;
             pending = reply?.pending === true;
             client.pending = pending;
             notify();
