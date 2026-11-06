@@ -39,6 +39,13 @@
         return (series?.episodes || []).map(item => item.id);
     }
 
+    function viewingUrl(id) {
+        if (/^\d{1,20}$/.test(id)) return `https://www.bilibili.com/bangumi/play/ep${id}`;
+        const match = id.match(/^ugc:(BV[0-9A-Za-z]{10}):p([1-9]\d{0,3})$/);
+        if (!match) throw new Error('Invalid episode identity.');
+        return `https://www.bilibili.com/video/${match[1]}/${match[2] === '1' ? '' : `?p=${match[2]}`}`;
+    }
+
     function save(metadata, result, preserveExisting = false) {
         const pending = writes.then(async () => {
             const document = await readDocument();
@@ -55,7 +62,7 @@
                 const record = {
                     id: episode.id,
                     number: String(source.number),
-                    url: `https://www.bilibili.com/bangumi/play/ep${episode.id}`,
+                    url: viewingUrl(episode.id),
                     duration: episode.duration ?? null,
                     updatedAt: new Date().toISOString(),
                     opening: null,

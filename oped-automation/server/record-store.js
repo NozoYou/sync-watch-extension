@@ -7,9 +7,18 @@ const recordFile = process.env.OPED_RECORD_FILE
     ? path.resolve(process.env.OPED_RECORD_FILE)
     : path.join(__dirname, 'data', 'oped-records.json');
 let writes = Promise.resolve();
+const episodeIdentity = /^(?:\d{1,20}|ugc:BV[0-9A-Za-z]{10}:p[1-9]\d{0,3})$/;
+const seriesIdentity = /^(?:\d{1,20}|ugc:(?:multi:BV[0-9A-Za-z]{10}|season:\d{1,20}))$/;
+
+function viewingUrl(id) {
+    if (/^\d{1,20}$/.test(id)) return `https://www.bilibili.com/bangumi/play/ep${id}`;
+    const match = id.match(/^ugc:(BV[0-9A-Za-z]{10}):p([1-9]\d{0,3})$/);
+    if (!match) throw new Error('Invalid episode identity.');
+    return `https://www.bilibili.com/video/${match[1]}/${match[2] === '1' ? '' : `?p=${match[2]}`}`;
+}
 
 function validateRecords(metadata, result) {
-    if (!metadata || !/^\d{1,20}$/.test(metadata.seriesId) ||
+    if (!metadata || !seriesIdentity.test(metadata.seriesId) ||
         typeof metadata.title !== 'string' || !metadata.title.trim() ||
         metadata.title.length > 300 || !Array.isArray(metadata.episodes)) {
         throw new Error('Missing series metadata.');
@@ -19,7 +28,7 @@ function validateRecords(metadata, result) {
     const seen = new Set();
     return result.episodes.map(episode => {
         const source = metadata.episodes.find(item => item.id === episode.id);
-        if (!source || !/^\d{1,20}$/.test(episode.id) || seen.has(episode.id)) {
+        if (!source || !episodeIdentity.test(episode.id) || seen.has(episode.id)) {
             throw new Error('Invalid episode identity.');
         }
         seen.add(episode.id);
@@ -40,7 +49,7 @@ function validateRecords(metadata, result) {
             id: episode.id,
             number: String(source.number).slice(0, 30),
             // Store the canonical viewing URL, never a signed CDN audio URL.
-            url: `https://www.bilibili.com/bangumi/play/ep${episode.id}`,
+            url: viewingUrl(episode.id),
             duration: episode.duration,
             updatedAt: new Date().toISOString(),
             ...times,

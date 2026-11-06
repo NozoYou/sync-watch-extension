@@ -18,8 +18,8 @@ and choose **Close controller**. The extension settings can enable it again.
   decorative rotation only.
 - `styles/style-1/` renders the classic sector controller layout.
 - `panels/` contains the shared room, join, and history panel renderers.
-- `player/skip-segments.js` provides the configurable seek action. OP/ED
-  detection and timestamp data are intentionally not implemented.
+- `player/skip-segments.js` provides configurable seeking and uses detected
+  OP/ED segments supplied by `oped-automation/` on supported Bilibili episodes.
 
 ## Interaction
 

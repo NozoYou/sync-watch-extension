@@ -12,6 +12,7 @@ const port = Number(process.env.OPED_PORT || 8788);
 const host = process.env.OPED_HOST || '127.0.0.1';
 const expected = Buffer.from(`Bearer ${token}`);
 let busy = false;
+const episodeIdentity = /^(?:\d{1,20}|ugc:BV[0-9A-Za-z]{10}:p[1-9]\d{0,3})$/;
 
 function authorized(request) {
     const supplied = Buffer.from(request.headers.authorization || '');
@@ -27,7 +28,7 @@ function validate(body) {
     if (!Array.isArray(body.episodes) || body.episodes.length !== 3) throw new Error('Three episodes required.');
     const identifiers = new Set();
     for (const episode of body.episodes) {
-        if (typeof episode.id !== 'string' || !/^\d{1,20}$/.test(episode.id) || identifiers.has(episode.id)) throw new Error('Invalid episode identity.');
+        if (typeof episode.id !== 'string' || !episodeIdentity.test(episode.id) || identifiers.has(episode.id)) throw new Error('Invalid episode identity.');
         identifiers.add(episode.id);
         if (!Number.isFinite(episode.duration) || episode.duration < 2 || episode.duration > 3600) throw new Error('Invalid duration.');
         if (!Array.isArray(episode.features) || !Array.isArray(episode.energies)) throw new Error('Missing fingerprints.');

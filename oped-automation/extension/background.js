@@ -41,8 +41,11 @@ importScripts(
     // Executed in the Bilibili page so authenticated API requests use its session.
     async function discoverEpisodes(expectedUrl, options = {}) {
         const requestedPage = new URL(expectedUrl);
+        const requestedPart = requestedPage.searchParams.get('p') || '1';
         const isCurrentPage = () => location.origin === requestedPage.origin &&
-            location.pathname === requestedPage.pathname;
+            location.pathname === requestedPage.pathname &&
+            (location.pathname.startsWith('/bangumi/') ||
+                (new URL(location.href).searchParams.get('p') || '1') === requestedPart);
         if (!isCurrentPage()) return { stale: true };
         async function api(path) {
             const response = await fetch(`https://api.bilibili.com${path}`, {
@@ -52,8 +55,136 @@ importScripts(
             if (body.code !== 0) throw new Error(`B站接口返回 ${body.code}，无法获取可访问的音轨。`);
             return body.result || body.data;
         }
+        const videoMatch = location.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/);
+        if (videoMatch) {
+            const bvid = videoMatch[1];
+            function readPodCatalog() {
+                for (const pod of document.querySelectorAll('.video-pod')) {
+                    const header = pod.querySelector('.video-pod__header a[href*="collectiondetail"]');
+                    if (!header) continue;
+                    const link = new URL(header.getAttribute('href'), location.href);
+                    const sid = link.searchParams.get('sid');
+                    if (link.hostname !== 'space.bilibili.com' || !/^\d{1,20}$/.test(sid || '')) continue;
+                    const seen = new Set();
+                    const episodes = [];
+                    for (const row of pod.querySelectorAll('.video-pod__list .video-pod__item[data-key]')) {
+                        const key = row.getAttribute('data-key');
+                        if (!/^BV[0-9A-Za-z]{10}$/.test(key || '') || seen.has(key)) continue;
+                        seen.add(key);
+                        episodes.push({ bvid: key });
+                    }
+                    // A related-video list or a stale pod must not become the current catalog.
+                    if (episodes.length >= 3 && seen.has(bvid)) {
+                        return {
+                            id: sid,
+                            title: header.getAttribute('title') || header.textContent.trim(),
+                            sections: [{ episodes }],
+                        };
+                    }
+                }
+                return null;
+            }
+            const podSeason = readPodCatalog();
+            let view;
+            try {
+                view = await api(`/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
+            } catch (error) {
+                const initialView = window.__INITIAL_STATE__?.videoData;
+                if (initialView?.bvid === bvid) view = initialView;
+                else if (podSeason) view = { title: podSeason.title };
+                else throw error;
+            }
+            const pages = (view.pages || []).filter(item => item.cid && Number(item.page) > 0);
+            const part = Number(requestedPart);
+            const apiSeason = view.ugc_season;
+            const apiBvids = new Set((apiSeason?.sections || [])
+                .flatMap(section => section.episodes || []).map(item => item.bvid || item.arc?.bvid));
+            const season = apiSeason?.id && apiBvids.has(bvid) && apiBvids.size >= 3
+                ? apiSeason
+                : podSeason && (!apiSeason?.id || String(apiSeason.id) === podSeason.id)
+                    ? podSeason : apiSeason;
+            const seasonItems = (season?.sections || []).flatMap(section => section.episodes || [])
+                .map((item, index) => {
+                    const itemBvid = item.bvid || item.arc?.bvid;
+                    if (!/^BV[0-9A-Za-z]{10}$/.test(itemBvid || '')) return null;
+                    return {
+                        id: `ugc:${itemBvid}:p1`, bvid: itemBvid,
+                        cid: item.cid || item.arc?.cid, page: 1,
+                        number: String(index + 1),
+                        url: `https://www.bilibili.com/video/${itemBvid}/`,
+                    };
+                }).filter(Boolean);
+            let items;
+            let seriesId;
+            let title;
+            if (part === 1 && seasonItems.length >= 3 &&
+                seasonItems.some(item => item.bvid === bvid) && season?.id) {
+                seriesId = `ugc:season:${season.id}`;
+                title = season.title || view.title;
+                items = seasonItems.filter((item, index) =>
+                    seasonItems.findIndex(other => other.id === item.id) === index);
+            } else if (pages.length >= 3) {
+                seriesId = `ugc:multi:${bvid}`;
+                title = view.title;
+                items = pages.map(item => ({
+                    id: `ugc:${bvid}:p${item.page}`, bvid, cid: item.cid,
+                    page: item.page, number: String(item.page),
+                    url: `https://www.bilibili.com/video/${bvid}/?p=${item.page}`,
+                }));
+            } else {
+                items = [];
+            }
+            const currentId = `ugc:${bvid}:p${Number.isInteger(part) && part > 0 ? part : 1}`;
+            if (!seriesId || items.length < 3 || !items.some(item => item.id === currentId)) {
+                throw new Error('当前视频没有可供比对的三集连续合集或多 P 内容。');
+            }
+            const catalog = {
+                seriesId, title, episodeOrder: items.map(item => item.id),
+                episodes: items.map(({ id, number, url }) => ({ id, number, url })),
+            };
+            if (options.catalogOnly) {
+                if (!isCurrentPage()) return { stale: true };
+                return { currentId, ...catalog };
+            }
+            const currentIndex = items.findIndex(item => item.id === currentId);
+            const selected = options.episodeIds
+                ? options.episodeIds.map(id => items.find(item => item.id === id))
+                : [items[currentIndex], ...items.filter(item => item.id !== currentId)
+                    .sort((a, b) => Math.abs(items.indexOf(a) - currentIndex) -
+                        Math.abs(items.indexOf(b) - currentIndex)).slice(0, 2)];
+            if (selected.length !== 3 || selected.some(item => !item)) {
+                throw new Error('无法找到后台队列中的三集视频。');
+            }
+            const result = [];
+            for (const item of selected) {
+                let cid = item.cid;
+                if (!cid) {
+                    const details = await api(`/x/web-interface/view?bvid=${encodeURIComponent(item.bvid)}`);
+                    cid = details.pages?.[0]?.cid || details.cid;
+                }
+                if (!cid) throw new Error(`第 ${item.number} 集没有可读取的视频标识。`);
+                const play = await api(`/x/player/playurl?bvid=${encodeURIComponent(item.bvid)}&cid=${cid}&qn=16&fnval=4048&fourk=0`);
+                const audio = (play.dash?.audio || []).filter(track =>
+                    (track.mimeType || track.mime_type || '').startsWith('audio/') &&
+                    Number(track.bandwidth) > 0 && (track.baseUrl || track.base_url))
+                    .sort((a, b) => a.bandwidth - b.bandwidth)[0];
+                if (!audio) throw new Error(`第 ${item.number} 集没有可访问的独立音轨。`);
+                result.push({
+                    id: item.id, cid: String(cid), number: item.number,
+                    audioUrl: audio.baseUrl || audio.base_url, bandwidth: audio.bandwidth,
+                });
+            }
+            if (!isCurrentPage()) return { stale: true };
+            return {
+                currentId, episodes: result, catalog,
+                metadata: {
+                    seriesId, title,
+                    episodes: selected.map(({ id, number, url }) => ({ id, number, url })),
+                },
+            };
+        }
         const match = location.pathname.match(/^\/bangumi\/play\/(ep|ss)(\d+)/);
-        if (!match) throw new Error('目前仅支持 B 站番剧剧集页面。');
+        if (!match) throw new Error('目前仅支持 B 站番剧和连续合集页面。');
         const season = await api(`/pgc/view/web/season?${match[1] === 'ep' ? 'ep_id' : 'season_id'}=${match[2]}`);
         const currentId = match[1] === 'ep'
             ? Number(match[2])
@@ -107,9 +238,13 @@ importScripts(
     function episodeId(url) {
         try {
             const parsed = new URL(url);
-            return parsed.hostname === 'www.bilibili.com'
-                ? parsed.pathname.match(/^\/bangumi\/play\/ep(\d+)/)?.[1] || ''
-                : '';
+            if (parsed.hostname !== 'www.bilibili.com') return '';
+            const video = parsed.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/);
+            if (video) {
+                const part = Number(parsed.searchParams.get('p') || 1);
+                return `ugc:${video[1]}:p${Number.isInteger(part) && part > 0 ? part : 1}`;
+            }
+            return parsed.pathname.match(/^\/bangumi\/play\/ep(\d+)/)?.[1] || '';
         } catch { return ''; }
     }
 
@@ -127,7 +262,7 @@ importScripts(
     }
 
     function queueSeason(sender, pageUrl) {
-        const key = `${sender.tab.id}:${new URL(pageUrl).pathname}`;
+        const key = `${sender.tab.id}:${episodeId(pageUrl) || new URL(pageUrl).pathname}`;
         if (queuedSeasons.has(key)) return;
         queuedSeasons.add(key);
 
@@ -195,7 +330,7 @@ importScripts(
         const failed = session.opedFailedEpisodes || [];
         const episodeIds = SyncWatchOpedQueue.nextBatch(queue.episodeOrder, [...known], failed);
         if (!episodeIds.length) {
-            await status('当前番剧的可检测剧集已处理完成；结果已缓存。');
+            await status('当前系列的可检测视频已处理完成；结果已缓存。');
             log('整季检测队列已完成', { series: queue.title, completed: known.size, failed: failed.length });
             return;
         }
@@ -218,14 +353,17 @@ importScripts(
         const settings = { ...defaults, ...saved.opedSettings };
         log('收到识别请求', { mode: settings.mode, enabled: settings.enabled, episodeId: id });
         if (!settings.enabled) return reply({ enabled: false });
-        if (!sender.tab || url.hostname !== 'www.bilibili.com' || !/^\/bangumi\/play\/(ep|ss)\d+/.test(url.pathname)) {
+        if (!sender.tab || url.hostname !== 'www.bilibili.com' ||
+            !(/^\/bangumi\/play\/(ep|ss)\d+/.test(url.pathname) ||
+                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(url.pathname))) {
             return reply({ enabled: true, unsupported: true });
         }
         // SPA navigation can leave sender.url pointing at the original episode.
         // Verify the explicitly requested route against the browser's live tab URL.
         const tab = await chrome.tabs.get(sender.tab.id);
         const liveUrl = new URL(tab.url || 'https://invalid.local');
-        if (liveUrl.origin !== url.origin || liveUrl.pathname !== url.pathname) {
+        if (liveUrl.origin !== url.origin || liveUrl.pathname !== url.pathname ||
+            (id && episodeId(liveUrl.href) !== id)) {
             log('剧集已切换，忽略旧页面请求', { episodeId: id });
             return reply({ enabled: true, pending: true });
         }
@@ -253,8 +391,8 @@ importScripts(
             }
             await status(backgroundEpisodeIds
                 ? '正在后台提前识别后续剧集的片头片尾…'
-                : '正在获取番剧目录和低码率音轨…');
-            log('开始获取番剧目录和三集低码率音轨信息');
+                : '正在获取视频目录和低码率音轨…');
+            log('开始获取视频目录和三集低码率音轨信息');
             const [execution] = await chrome.scripting.executeScript({
                 target: { tabId: sender.tab.id, frameIds: [0] }, world: 'MAIN', func: discoverEpisodes,
                 args: [url.href, { episodeIds: backgroundEpisodeIds }],
@@ -263,8 +401,8 @@ importScripts(
                 if (backgroundEpisodeIds) scheduleNextBatch();
                 return reply({ enabled: true, pending: true });
             }
-            if (!execution?.result?.episodes) throw new Error('无法读取番剧音轨，请确认当前账号可播放这三集。');
-            log('番剧目录和音轨信息获取完成', {
+            if (!execution?.result?.episodes) throw new Error('无法读取视频音轨，请确认当前账号可播放这三集。');
+            log('视频目录和音轨信息获取完成', {
                 series: execution.result.metadata.title,
                 episodes: execution.result.episodes.map(item => ({ number: item.number, bandwidth: item.bandwidth })),
             });

@@ -21,7 +21,18 @@
 
     function refreshAvailability() {
         client.enabled = settingEnabled && location.hostname === 'www.bilibili.com' &&
-            /^\/bangumi\/play\/(ep|ss)\d+/.test(location.pathname);
+            (/^\/bangumi\/play\/(ep|ss)\d+/.test(location.pathname) ||
+                /^\/video\/BV[0-9A-Za-z]{10}(?:\/|$)/.test(location.pathname));
+    }
+
+    function pageEpisodeId(url) {
+        const parsed = new URL(url);
+        const video = parsed.pathname.match(/^\/video\/(BV[0-9A-Za-z]{10})(?:\/|$)/);
+        if (video) {
+            const part = Number(parsed.searchParams.get('p') || 1);
+            return `ugc:${video[1]}:p${Number.isInteger(part) && part > 0 ? part : 1}`;
+        }
+        return parsed.pathname.match(/^\/bangumi\/play\/ep(\d+)/)?.[1] || '';
     }
 
     async function update(force = false) {
@@ -50,7 +61,7 @@
             const reply = await chrome.runtime.sendMessage({ type: 'OPED_START', pageUrl: page });
             if (page !== location.href || version !== pageVersion) return;
             // Never apply a result returned for another episode or an earlier route.
-            const currentId = new URL(page).pathname.match(/^\/bangumi\/play\/ep(\d+)/)?.[1];
+            const currentId = pageEpisodeId(page);
             if (reply?.pageUrl !== page || (currentId && reply.episodeId !== currentId)) {
                 pending = true;
                 client.segments = [];

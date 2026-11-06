@@ -12,7 +12,7 @@
                 mode: modes.find(input => input.checked)?.value || 'local',
                 server: server.value.trim(), token: token.value.trim(),
             },
-            opedStatus: enabled.checked ? '打开 B 站番剧页面后自动检测。' : '音频识别已关闭。',
+            opedStatus: enabled.checked ? '打开 B 站番剧或连续合集页面后自动检测。' : '音频识别已关闭。',
         });
     }
     chrome.storage.local.get(['opedSettings', 'opedStatus']).then(saved => {
